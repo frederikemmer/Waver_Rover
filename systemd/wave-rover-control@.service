@@ -1,0 +1,23 @@
+[Unit]
+Description=WAVE ROVER browser control service for user %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/wave-rover-control
+EnvironmentFile=-/etc/default/wave-rover-control
+SupplementaryGroups=dialout video
+ExecStart=/opt/wave-rover-control/.venv/bin/python -m wave_rover
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=4
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

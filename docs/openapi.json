@@ -1,0 +1,503 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "WAVE ROVER Control API",
+    "version": "1.0.0",
+    "description": "Local API for motor commands, battery-voltage telemetry, camera settings, OpenCV line following, and status. Authentication is not enabled; keep this service on a trusted local network."
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Get service health and hardware status",
+        "responses": {
+          "200": {
+            "description": "Combined live status.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "operationId": "getStatus",
+        "summary": "Get service, drive, battery, and camera status",
+        "responses": {
+          "200": {
+            "description": "Combined live status.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drive": {
+      "get": {
+        "operationId": "getDriveStatus",
+        "summary": "Get UART state and latest requested wheel speeds",
+        "responses": {
+          "200": {
+            "description": "Drive status. Wheel speeds are requested values, not measured motion.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DriveStatus" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "setDriveSpeeds",
+        "summary": "Set bounded left and right wheel speeds",
+        "description": "A nonzero command expires after the watchdog lease unless refreshed. At the default configuration, the maximum applied value is 0.5, representing 100% motor PWM.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DriveCommand" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Command validated, clamped, and queued.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DriveAccepted" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "415": { "$ref": "#/components/responses/UnsupportedMediaType" }
+        }
+      }
+    },
+    "/api/v1/drive/stop": {
+      "post": {
+        "operationId": "stopDrive",
+        "summary": "Request zero speed for both sides",
+        "responses": {
+          "200": {
+            "description": "Zero-speed command queued.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DriveStopAccepted" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/battery": {
+      "get": {
+        "operationId": "getBatteryStatus",
+        "summary": "Get battery-voltage telemetry and rough percentage estimate",
+        "description": "The installed WAVE ROVER UART firmware reports pack voltage. The percentage is estimated from a generic 3S Li-ion voltage curve; it is not a battery-gauge reading and may shift under motor load.",
+        "responses": {
+          "200": {
+            "description": "Latest reading and its freshness state.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BatteryStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/camera": {
+      "get": {
+        "operationId": "getCameraStatus",
+        "summary": "Get camera state and selected capture mode",
+        "responses": {
+          "200": {
+            "description": "Camera status.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CameraStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/camera/resolution": {
+      "post": {
+        "operationId": "setCameraResolution",
+        "summary": "Select a live camera resolution preset",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CameraResolutionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preset accepted.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CameraResolutionAccepted" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "415": { "$ref": "#/components/responses/UnsupportedMediaType" }
+        }
+      }
+    },
+    "/api/v1/camera.mjpg": {
+      "get": {
+        "operationId": "getCameraStream",
+        "summary": "Stream live camera frames as MJPEG",
+        "responses": {
+          "200": {
+            "description": "Multipart MJPEG response.",
+            "content": {
+              "multipart/x-mixed-replace; boundary=frame": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/autonomy/line": {
+      "get": {
+        "operationId": "getLineAutonomyStatus",
+        "summary": "Get line detector and follower status",
+        "responses": {
+          "200": {
+            "description": "Current HSV configuration, camera detection, and autonomous drive state.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LineAutonomyStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/autonomy/line/config": {
+      "post": {
+        "operationId": "configureLineAutonomy",
+        "summary": "Apply line color and follower settings",
+        "description": "Configuration is evaluated continuously for the mask preview. It cannot be changed while following is active.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LineAutonomyConfig" },
+              "example": { "color_preset": "white", "line_mode": "single", "speed_percent": 15, "roi_top_percent": 58 }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings accepted.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LineAutonomyAccepted" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "413": { "$ref": "#/components/responses/TooLarge" },
+          "415": { "$ref": "#/components/responses/UnsupportedMediaType" }
+        }
+      }
+    },
+    "/api/v1/autonomy/line/start": {
+      "post": {
+        "operationId": "startLineFollowing",
+        "summary": "Start autonomous line following",
+        "description": "Requires OpenCV, a fresh camera image with the configured line detected, and a connected Rover UART. Line or camera loss stops the motors and disarms the follower.",
+        "responses": {
+          "200": {
+            "description": "Line following armed.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LineAutonomyAccepted" }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/v1/autonomy/line/stop": {
+      "post": {
+        "operationId": "stopLineFollowing",
+        "summary": "Stop autonomous line following",
+        "responses": {
+          "200": {
+            "description": "Follower disarmed and zero-speed command queued.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LineAutonomyAccepted" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/autonomy/line/preview.mjpg": {
+      "get": {
+        "operationId": "getLineMaskStream",
+        "summary": "Stream the current HSV threshold mask",
+        "responses": {
+          "200": {
+            "description": "Multipart JPEG mask with ROI, image center, and detected target marker.",
+            "content": {
+              "multipart/x-mixed-replace; boundary=frame": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenApiSpec",
+        "summary": "Get this OpenAPI specification",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON document.",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string" }
+        }
+      },
+      "DriveCommand": {
+        "type": "object",
+        "required": ["left", "right"],
+        "properties": {
+          "left": { "type": "number", "minimum": -1, "maximum": 1, "description": "Requested left-wheel command. Applied value is clamped to WAVER_MAX_SPEED (default 0.5)." },
+          "right": { "type": "number", "minimum": -1, "maximum": 1, "description": "Requested right-wheel command. Applied value is clamped to WAVER_MAX_SPEED (default 0.5)." }
+        },
+        "additionalProperties": false
+      },
+      "DriveAccepted": {
+        "type": "object",
+        "required": ["accepted", "left", "right", "max_speed"],
+        "properties": {
+          "accepted": { "type": "boolean", "const": true },
+          "left": { "type": "number" },
+          "right": { "type": "number" },
+          "max_speed": { "type": "number" }
+        }
+      },
+      "DriveStopAccepted": {
+        "type": "object",
+        "required": ["accepted", "drive"],
+        "properties": {
+          "accepted": { "type": "boolean", "const": true },
+          "drive": { "$ref": "#/components/schemas/DriveStatus" }
+        }
+      },
+      "DriveStatus": {
+        "type": "object",
+        "required": ["state", "device", "error", "max_speed", "watchdog_ms", "requested_speeds"],
+        "properties": {
+          "state": { "type": "string", "enum": ["starting", "connected", "offline", "disabled"] },
+          "device": { "type": ["string", "null"] },
+          "error": { "type": ["string", "null"] },
+          "max_speed": { "type": "number" },
+          "watchdog_ms": { "type": "integer" },
+          "requested_speeds": {
+            "type": "object",
+            "required": ["left", "right"],
+            "properties": {
+              "left": { "type": "number" },
+              "right": { "type": "number" }
+            }
+          }
+        }
+      },
+      "BatteryStatus": {
+        "type": "object",
+        "required": ["state", "voltage_v", "charge_percent_estimate", "estimate_method", "updated_age_s", "source"],
+        "properties": {
+          "state": { "type": "string", "enum": ["waiting", "available", "stale", "disabled"] },
+          "voltage_v": { "type": ["number", "null"], "description": "Measured pack voltage in volts." },
+          "charge_percent_estimate": { "type": ["integer", "null"], "minimum": 0, "maximum": 100, "multipleOf": 5, "description": "Rough estimate from pack voltage, rounded to 5% steps. Generic 3S Li-ion curve; not a calibrated gauge value. Null until voltage is available." },
+          "estimate_method": { "type": "string", "const": "generic_3s_li_ion_voltage_curve", "description": "Approximation method used for charge_percent_estimate." },
+          "updated_age_s": { "type": ["number", "null"], "description": "Age of the last valid reading in seconds." },
+          "source": { "type": "string", "const": "waveshare_uart_t1001" }
+        }
+      },
+      "CameraStatus": {
+        "type": "object",
+        "required": ["state", "device", "width", "height", "fps", "preset", "frame_age_ms", "error"],
+        "properties": {
+          "state": { "type": "string", "enum": ["starting", "online", "offline", "disabled"] },
+          "device": { "type": ["string", "null"] },
+          "width": { "type": ["integer", "null"] },
+          "height": { "type": ["integer", "null"] },
+          "fps": { "type": ["integer", "null"] },
+          "preset": { "type": ["string", "null"], "enum": ["vga", "hd", "full-hd", "5mp", null] },
+          "frame_age_ms": { "type": ["integer", "null"] },
+          "error": { "type": ["string", "null"] }
+        }
+      },
+      "LineAutonomyConfig": {
+        "type": "object",
+        "properties": {
+          "color_preset": { "type": "string", "enum": ["white", "black", "yellow", "red", "green", "blue", "custom"] },
+          "line_mode": { "type": "string", "enum": ["single", "between"] },
+          "between_strategy": { "type": "string", "enum": ["midpoint", "stay_between"], "default": "midpoint", "description": "For two boundaries, follow their midpoint or only steer back when the image center leaves the corridor." },
+          "h_min": { "type": "integer", "minimum": 0, "maximum": 179, "description": "Hue lower bound. h_min > h_max selects the hue wrap interval." },
+          "h_max": { "type": "integer", "minimum": 0, "maximum": 179 },
+          "s_min": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "s_max": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "v_min": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "v_max": { "type": "integer", "minimum": 0, "maximum": 255 },
+          "roi_top_percent": { "type": "integer", "minimum": 25, "maximum": 85 },
+          "speed_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "steering_gain": { "type": "number", "minimum": 0.2, "maximum": 2.5 },
+          "min_area_percent": { "type": "number", "minimum": 0.05, "maximum": 5 }
+        },
+        "additionalProperties": false
+      },
+      "LineDetection": {
+        "type": "object",
+        "required": ["line_detected", "line_count", "target_x_percent", "target_y_percent", "boundary_left_x_percent", "boundary_right_x_percent", "steering_error", "heading_error", "area_percent", "contour_count", "width", "height", "roi_top_percent", "fps", "frame_age_ms"],
+        "properties": {
+          "line_detected": { "type": "boolean" },
+          "line_count": { "type": "integer", "description": "1 for one line; 2 for a pair of boundaries." },
+          "target_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "target_y_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "boundary_left_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "boundary_right_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "steering_error": { "type": ["number", "null"], "minimum": -1, "maximum": 1, "description": "Signed correction input combining near-line position and look-ahead heading in single mode; center offset in between mode." },
+          "heading_error": { "type": ["number", "null"], "minimum": -1, "maximum": 1, "description": "Single-line near-vs-far direction estimate; null for two-boundary mode or no line." },
+          "area_percent": { "type": "number" },
+          "contour_count": { "type": "integer" },
+          "width": { "type": ["integer", "null"] },
+          "height": { "type": ["integer", "null"] },
+          "roi_top_percent": { "type": "integer" },
+          "fps": { "type": "number" },
+          "frame_age_ms": { "type": ["integer", "null"] }
+        }
+      },
+      "LineAutonomyStatus": {
+        "type": "object",
+        "required": ["available", "active", "state", "config", "detection", "error"],
+        "properties": {
+          "available": { "type": "boolean" },
+          "active": { "type": "boolean" },
+          "state": { "type": "string", "enum": ["vision_unavailable", "waiting_camera", "updating", "no_line", "ready", "following", "paused", "line_lost", "camera_lost", "error"] },
+          "config": { "$ref": "#/components/schemas/LineAutonomyConfig" },
+          "detection": { "$ref": "#/components/schemas/LineDetection" },
+          "error": { "type": ["string", "null"] }
+        }
+      },
+      "LineAutonomyAccepted": {
+        "type": "object",
+        "required": ["accepted", "autonomy"],
+        "properties": {
+          "accepted": { "type": "boolean", "const": true },
+          "autonomy": { "$ref": "#/components/schemas/LineAutonomyStatus" }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "required": ["service", "mode", "drive", "battery", "camera", "autonomy"],
+        "properties": {
+          "service": { "type": "string", "const": "online" },
+          "mode": { "type": "string", "enum": ["manual", "autonomous"] },
+          "drive": { "$ref": "#/components/schemas/DriveStatus" },
+          "battery": { "$ref": "#/components/schemas/BatteryStatus" },
+          "camera": { "$ref": "#/components/schemas/CameraStatus" },
+          "autonomy": { "$ref": "#/components/schemas/LineAutonomyStatus" }
+        }
+      },
+      "CameraResolutionRequest": {
+        "type": "object",
+        "required": ["preset"],
+        "properties": {
+          "preset": { "type": "string", "enum": ["vga", "hd", "full-hd", "5mp"] }
+        },
+        "additionalProperties": false
+      },
+      "CameraResolutionAccepted": {
+        "type": "object",
+        "required": ["accepted", "camera"],
+        "properties": {
+          "accepted": { "type": "boolean", "const": true },
+          "camera": { "$ref": "#/components/schemas/CameraStatus" }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid JSON, values, or camera preset.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "Request body exceeds the configured size limit.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Request body must use application/json.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Autonomy is already active or required line, camera, or UART state is not ready.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "OpenCV or the line preview/following implementation is unavailable.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    }
+  }
+}

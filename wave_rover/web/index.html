@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101a27">
+    <title>WAVE ROVER · Steuerung</title>
+    <link rel="stylesheet" href="/app.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="WAVE ROVER Startseite">
+          <span class="brand-mark" aria-hidden="true">W</span>
+          <span>
+            <strong>WAVE ROVER</strong>
+            <small>STUDENT LAB</small>
+          </span>
+        </a>
+        <div class="topbar-right">
+          <nav class="mode-nav" aria-label="Fahrmodus">
+            <a class="mode-link" href="/" aria-current="page">Manuell</a>
+            <a class="mode-link" href="/autonomy">Autonom</a>
+          </nav>
+          <span class="topbar-caption">LOKALE VERBINDUNG</span>
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="Rover-Steuerung" data-control-width="380">
+        <section class="camera-card panel">
+          <div class="panel-heading camera-heading">
+            <div class="camera-heading-title">
+              <h1>Livebild</h1>
+              <label class="resolution-control" for="camera-resolution">
+                <select id="camera-resolution" aria-label="Auflösung des Livebilds">
+                  <option value="vga">640 × 480 · VGA</option>
+                  <option value="hd">1280 × 720 · HD</option>
+                  <option value="full-hd">1920 × 1080 · Full HD</option>
+                  <option value="5mp">2592 × 1944 · 5 MP</option>
+                </select>
+              </label>
+            </div>
+            <div class="camera-meta">
+              <span id="camera-status" class="status-pill status-waiting">
+                <span class="status-dot"></span><span>Verbinde …</span>
+              </span>
+            </div>
+          </div>
+          <div class="camera-viewport">
+            <div id="camera-placeholder" class="camera-placeholder">
+              <span class="camera-icon" aria-hidden="true">◉</span>
+              <strong>Warte auf Kamerabild</strong>
+              <span>Die Kamera wird direkt vom Rover gestreamt.</span>
+            </div>
+            <img id="camera-feed" src="/api/v1/camera.mjpg" alt="Livebild der Rover-Kamera">
+            <span id="camera-live-label" class="camera-overlay-label is-offline">
+              <span class="live-dot"></span><span>STANDBY</span>
+            </span>
+          </div>
+        </section>
+
+        <div class="workspace-splitter" role="separator" aria-orientation="vertical" aria-label="Breite von Kamerabild und Steuerung ändern" aria-valuemin="340" aria-valuemax="540" aria-valuenow="380" tabindex="0" title="Ziehen oder mit den Pfeiltasten anpassen"></div>
+
+        <section class="control-card panel" aria-labelledby="drive-title">
+          <div class="panel-heading control-heading">
+            <div class="control-heading-main">
+              <h2 id="drive-title">Steuerung</h2>
+              <div class="keyboard-legend" aria-label="Tastaturbelegung">
+                <span class="key-group"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> oder Pfeiltasten</span>
+              </div>
+            </div>
+            <span id="drive-status" class="status-pill status-waiting">
+              <span class="status-dot"></span><span>Verbinde …</span>
+            </span>
+          </div>
+
+          <div class="drive-content">
+            <div class="direction-pad" aria-label="Richtungstasten">
+              <span class="pad-space" aria-hidden="true"></span>
+              <button class="direction-button" type="button" data-direction="forward" aria-label="Vorwärts fahren">
+                <span aria-hidden="true">↑</span>
+              </button>
+              <span class="pad-space" aria-hidden="true"></span>
+              <button class="direction-button" type="button" data-direction="left" aria-label="Nach links drehen">
+                <span aria-hidden="true">←</span>
+              </button>
+              <span class="pad-center" aria-hidden="true"><span></span></span>
+              <button class="direction-button" type="button" data-direction="right" aria-label="Nach rechts drehen">
+                <span aria-hidden="true">→</span>
+              </button>
+              <span class="pad-space" aria-hidden="true"></span>
+              <button class="direction-button" type="button" data-direction="backward" aria-label="Rückwärts fahren">
+                <span aria-hidden="true">↓</span>
+              </button>
+              <span class="pad-space" aria-hidden="true"></span>
+            </div>
+
+            <div class="speed-control">
+              <div class="speed-heading">
+                <label for="speed">Geschwindigkeit</label>
+                <span class="speed-value-control">
+                  <input id="speed-number" type="number" inputmode="numeric" min="0" max="100" step="1" value="30" aria-label="Geschwindigkeit in Prozent">
+                  <span>%</span>
+                </span>
+              </div>
+              <input id="speed" type="range" min="0" max="100" step="1" value="30">
+              <div class="speed-scale"><span>0 %</span><span id="speed-maximum-label">100 %</span></div>
+            </div>
+
+            <div id="battery-readout" class="battery-readout" aria-live="polite">
+              <span class="battery-icon" aria-hidden="true"></span>
+              <span class="battery-copy">
+                <span class="battery-values">
+                  <strong id="battery-percent">Warte auf Rover …</strong>
+                  <span id="battery-voltage" class="battery-voltage"></span>
+                </span>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <details id="api-guide" class="api-guide panel">
+          <summary class="api-summary">
+            <span class="api-summary-copy">
+              <strong>API für Studierende</strong>
+              <span>Motoren, Akku, Kamera und Status über HTTP ansprechen</span>
+            </span>
+            <span class="api-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="api-content">
+            <div class="api-intro">
+              <label class="api-search-control" for="api-search">
+                <span>Endpunkte durchsuchen</span>
+                <input id="api-search" type="search" placeholder="z. B. Akku, Kamera, POST oder /drive">
+              </label>
+              <div class="api-intro-side">
+                <span id="api-search-results" class="api-search-results" aria-live="polite">10 Endpunkte</span>
+                <a class="api-openapi-link" href="/api/v1/openapi.json">OpenAPI-Spezifikation (JSON)</a>
+              </div>
+            </div>
+            <div class="api-endpoints">
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/healthz</code></div>
+                <p>Prüft den Dienst und liefert den kombinierten Zustand von Antrieb, Akku und Kamera.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/status</code></div>
+                <p>Gibt Dienstmodus sowie Status und Messwerte aller Rover-Komponenten in einer Antwort zurück.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/drive</code></div>
+                <p>Zeigt UART-Verbindung, Geschwindigkeitslimit, Timeout und zuletzt angeforderte Radwerte.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-post">POST</span><code>/api/v1/drive</code></div>
+                <p>Setzt linke und rechte Radgeschwindigkeit. Werte von −1 bis 1; der Server begrenzt sie und stoppt ohne Erneuerung nach kurzer Zeit.</p>
+                <code class="api-example">{"left":0.15,"right":0.15}</code>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-post">POST</span><code>/api/v1/drive/stop</code></div>
+                <p>Fordert für beide Antriebsseiten sofort den Stillstand an.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/battery</code></div>
+                <p>Liefert Akkuspannung, grobe Prozent-Schätzung aus der 3S-Li-Ion-Kurve und Alter der Messung.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/camera</code></div>
+                <p>Zeigt Kamerazustand, Bildauflösung, Bildrate, Preset und Aktualität des letzten Frames.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-post">POST</span><code>/api/v1/camera/resolution</code></div>
+                <p>Wählt VGA, HD, Full HD oder 5 MP. Der gewünschte Presetname wird als JSON gesendet.</p>
+                <code class="api-example">{"preset":"full-hd"}</code>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/camera.mjpg</code></div>
+                <p>Stellt den Livebild-Stream im MJPEG-Format für eigene Python- oder Browserprogramme bereit.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/autonomy/line</code></div>
+                <p>Zeigt Status, Erkennung, aktuelle HSV-Einstellungen und Position der Linienfolge.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-post">POST</span><code>/api/v1/autonomy/line/config</code></div>
+                <p>Übernimmt Linienfarbe, HSV-Grenzen, Bildbereich, Geschwindigkeit und Lenkempfindlichkeit.</p>
+                <code class="api-example">{"color_preset":"white","speed_percent":15}</code>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-post">POST</span><code>/api/v1/autonomy/line/start</code></div>
+                <p>Startet die Linienfolge nur bei aktuellem Kamerabild, erkannter Linie und verbundener Motorsteuerung.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-post">POST</span><code>/api/v1/autonomy/line/stop</code></div>
+                <p>Beendet die autonome Fahrt und fordert für beide Seiten null Geschwindigkeit an.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/autonomy/line/preview.mjpg</code></div>
+                <p>Liefert die Erkennungsmaske als MJPEG-Bild zum Einstellen der HSV-Farbgrenzen.</p>
+              </article>
+              <article class="api-endpoint" data-api-entry>
+                <div class="api-endpoint-heading"><span class="api-method api-method-get">GET</span><code>/api/v1/openapi.json</code></div>
+                <p>Liefert die maschinenlesbare OpenAPI-3.1-Beschreibung mit Parametern, Antworten und Datenmodellen.</p>
+              </article>
+            </div>
+            <p id="api-no-results" class="api-no-results" hidden>Keine passenden API-Endpunkte gefunden.</p>
+            <p class="api-note">Die Python-API ist für das lokale Rover-Netz vorgesehen. Nicht-null Motorbefehle regelmäßig erneuern und beim Beenden stoppen.</p>
+          </div>
+        </details>
+      </section>
+
+      <footer class="page-footer">
+        <span>WAVE ROVER <span class="footer-separator">/</span> PRAKTIKUM</span>
+        <span class="footer-right">
+          <a id="api-discovery-link" href="#api-guide">API &amp; Endpunkte</a>
+          <span>BEDIENUNG NUR IM FREIEN TESTBEREICH</span>
+        </span>
+      </footer>
+    </main>
+  </body>
+</html>

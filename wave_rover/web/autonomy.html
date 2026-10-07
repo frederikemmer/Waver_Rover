@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101a27">
+    <title>WAVE ROVER · Linienfolge</title>
+    <link rel="stylesheet" href="/app.css">
+    <script src="/autonomy.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="WAVE ROVER Startseite">
+          <span class="brand-mark" aria-hidden="true">W</span>
+          <span>
+            <strong>WAVE ROVER</strong>
+            <small>STUDENT LAB</small>
+          </span>
+        </a>
+        <div class="topbar-right">
+          <nav class="mode-nav" aria-label="Fahrmodus">
+            <a class="mode-link" href="/">Manuell</a>
+            <a class="mode-link" href="/autonomy" aria-current="page">Autonom</a>
+          </nav>
+          <span class="topbar-caption">LOKALE VERBINDUNG</span>
+        </div>
+      </header>
+
+      <section class="workspace autonomy-workspace" aria-label="Autonome Linienfolge" data-control-width="400">
+        <div class="autonomy-vision-column">
+          <section class="camera-card panel autonomy-camera" aria-labelledby="autonomy-camera-title">
+            <div class="panel-heading camera-heading">
+              <div class="camera-heading-title">
+                <h1 id="autonomy-camera-title">Livebild</h1>
+                <label class="resolution-control" for="camera-resolution">
+                  <select id="camera-resolution" aria-label="Auflösung des Livebilds">
+                    <option value="vga">640 × 480 · VGA</option>
+                    <option value="hd">1280 × 720 · HD</option>
+                    <option value="full-hd">1920 × 1080 · Full HD</option>
+                    <option value="5mp">2592 × 1944 · 5 MP</option>
+                  </select>
+                </label>
+              </div>
+              <span id="camera-status" class="status-pill status-waiting">
+                <span class="status-dot"></span><span>Verbinde …</span>
+              </span>
+            </div>
+            <div class="camera-viewport">
+              <div id="camera-placeholder" class="camera-placeholder">
+                <span class="camera-icon" aria-hidden="true">◉</span>
+                <strong>Warte auf Kamerabild</strong>
+                <span>Die Kamera wird direkt vom Rover gestreamt.</span>
+              </div>
+              <img id="camera-feed" src="/api/v1/camera.mjpg" alt="Livebild der Rover-Kamera">
+              <span id="camera-live-label" class="camera-overlay-label is-offline">
+                <span class="live-dot"></span><span>STANDBY</span>
+              </span>
+              <span id="color-pick-target" class="color-pick-target" hidden>Farbpunkt im Bild antippen</span>
+              <svg id="line-overlay" class="line-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <rect id="line-roi-overlay" x="0" y="58" width="100" height="42"></rect>
+                <line id="line-center-overlay" x1="50" y1="0" x2="50" y2="100"></line>
+                <circle id="line-target-overlay" cx="50" cy="82" r="2.2" hidden></circle>
+              </svg>
+            </div>
+          </section>
+
+          <section class="panel line-vision-card" aria-labelledby="line-mask-title">
+            <div class="panel-heading line-vision-heading">
+              <div><h2 id="line-mask-title">Erkennungsmaske</h2><p>Weiß zeigt erkannte Farbflächen; der grüne Kreis markiert die Ziellinie.</p></div>
+              <span id="line-fps" class="line-fps">— FPS</span>
+            </div>
+            <div class="line-mask-viewport">
+              <div id="line-mask-placeholder">Warte auf OpenCV-Auswertung …</div>
+              <img id="line-mask" src="/api/v1/autonomy/line/preview.mjpg" alt="Von OpenCV erkannte Farbflächen">
+            </div>
+          </section>
+        </div>
+
+        <div class="workspace-splitter" role="separator" aria-orientation="vertical" aria-label="Breite von Kamerabild und Einstellungen ändern" aria-valuemin="340" aria-valuemax="480" aria-valuenow="400" tabindex="0" title="Ziehen oder mit den Pfeiltasten anpassen"></div>
+
+        <section class="control-card panel autonomy-controls" aria-labelledby="line-controls-title">
+          <div class="panel-heading autonomy-heading">
+            <h2 id="line-controls-title">Linienfolge</h2>
+            <span id="line-state-pill" class="status-pill status-waiting">
+              <span class="status-dot"></span><span>Warte auf Kamera</span>
+            </span>
+          </div>
+          <div class="autonomy-control-content">
+            <p class="autonomy-intro">Gleichfarbige Flächen können ebenfalls erkannt werden. Prüfe die Maske vor „Start“.</p>
+
+            <div class="line-choice-grid">
+              <label class="field-label" for="line-color">
+                <span>Linienfarbe</span>
+                <select id="line-color">
+                  <option value="white">Weiß</option>
+                  <option value="black">Schwarz</option>
+                  <option value="yellow">Gelb</option>
+                  <option value="red">Rot</option>
+                  <option value="green">Grün</option>
+                  <option value="blue">Blau</option>
+                  <option value="custom">Benutzerdefiniert</option>
+                </select>
+              </label>
+              <label class="field-label" for="line-mode">
+                <span>Linienart</span>
+                <select id="line-mode">
+                  <option value="single">Einzelne Linie</option>
+                  <option value="between">Zwischen zwei Linien</option>
+                </select>
+              </label>
+              <label id="between-strategy-field" class="field-label" for="between-strategy" hidden>
+                <span>Position zwischen den Linien</span>
+                <select id="between-strategy">
+                  <option value="midpoint">Mittig zwischen den Linien</option>
+                  <option value="stay_between">Im Korridor bleiben</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="color-picker-row">
+              <button id="color-pick-button" class="secondary-button" type="button">Farbe im Livebild auswählen</button>
+              <div class="color-sample" aria-live="polite">
+                <canvas id="color-swatch" class="color-swatch" width="23" height="23" aria-hidden="true"></canvas>
+                <span id="color-sample-values">Kein Farbpunkt gewählt</span>
+              </div>
+            </div>
+            <p id="color-picker-hint" class="color-picker-hint">Farbpunkt auswählen; die Bereiche werden um den Messwert gesetzt.</p>
+
+            <div class="speed-control autonomy-speed">
+              <div class="speed-heading">
+                <label for="line-speed">Fahrgeschwindigkeit</label>
+                <span class="speed-value-control">
+                  <input id="line-speed-number" type="number" inputmode="numeric" min="0" max="100" step="1" value="15" aria-label="Autonome Geschwindigkeit in Prozent">
+                  <span>%</span>
+                </span>
+              </div>
+              <input id="line-speed" type="range" min="0" max="100" step="1" value="15" aria-label="Fahrgeschwindigkeit">
+              <div class="speed-scale"><span>0 %</span><span>100 %</span></div>
+            </div>
+
+            <label class="range-setting" for="line-roi-top">
+              <span><span>Bildbereich auswerten</span><strong id="line-roi-value">ab 58 % Bildhöhe</strong></span>
+              <input id="line-roi-top" type="range" min="25" max="85" step="1" value="58">
+              <small>Nur der untere Teil des Kamerabilds wird nach der Linie durchsucht.</small>
+            </label>
+
+            <details class="advanced-settings">
+              <summary>Farb- und Reglerfeineinstellung</summary>
+              <div class="hsv-grid">
+                <div class="threshold-field">
+                  <span>Farbtonbereich <small>Min. / Max.</small></span>
+                  <div class="dual-range" data-range-key="h">
+                    <div class="dual-range-rail" aria-hidden="true"></div>
+                    <input id="h-min" class="range-handle range-handle-min" type="range" min="0" max="179" value="0" aria-label="Farbtonbereich Minimum">
+                    <input id="h-max" class="range-handle range-handle-max" type="range" min="0" max="179" value="179" aria-label="Farbtonbereich Maximum">
+                    <output id="h-min-value" class="range-bubble range-bubble-min" data-position="0">0</output>
+                    <output id="h-max-value" class="range-bubble range-bubble-max" data-position="100">179</output>
+                  </div>
+                  <small>OpenCV 0–179; der Bereich darf über 179 auf 0 wechseln.</small>
+                </div>
+                <div class="threshold-field">
+                  <span>Sättigungsbereich <small>Min. / Max.</small></span>
+                  <div class="dual-range" data-range-key="s">
+                    <div class="dual-range-rail" aria-hidden="true"></div>
+                    <input id="s-min" class="range-handle range-handle-min" type="range" min="0" max="255" value="0" aria-label="Sättigungsbereich Minimum">
+                    <input id="s-max" class="range-handle range-handle-max" type="range" min="0" max="255" value="85" aria-label="Sättigungsbereich Maximum">
+                    <output id="s-min-value" class="range-bubble range-bubble-min" data-position="0">0</output>
+                    <output id="s-max-value" class="range-bubble range-bubble-max" data-position="33">85</output>
+                  </div>
+                  <small>OpenCV 0–255.</small>
+                </div>
+                <div class="threshold-field">
+                  <span>Helligkeitsbereich <small>Min. / Max.</small></span>
+                  <div class="dual-range" data-range-key="v">
+                    <div class="dual-range-rail" aria-hidden="true"></div>
+                    <input id="v-min" class="range-handle range-handle-min" type="range" min="0" max="255" value="150" aria-label="Helligkeitsbereich Minimum">
+                    <input id="v-max" class="range-handle range-handle-max" type="range" min="0" max="255" value="255" aria-label="Helligkeitsbereich Maximum">
+                    <output id="v-min-value" class="range-bubble range-bubble-min" data-position="59">150</output>
+                    <output id="v-max-value" class="range-bubble range-bubble-max" data-position="100">255</output>
+                  </div>
+                  <small>OpenCV 0–255.</small>
+                </div>
+              </div>
+              <label class="range-setting compact-range" for="line-gain">
+                <span><span>Lenkempfindlichkeit</span><strong id="line-gain-value">1,0</strong></span>
+                <input id="line-gain" type="range" min="0.2" max="2.5" step="0.1" value="1.0">
+                <small>Höher reagiert der Rover stärker auf seitliche Abweichungen.</small>
+              </label>
+              <label class="range-setting compact-range" for="line-min-area">
+                <span><span>Kleinste erkannte Fläche</span><strong id="line-area-value">0,15 %</strong></span>
+                <input id="line-min-area" type="range" min="0.05" max="5" step="0.05" value="0.15">
+                <small>Hilft kleine Farbflecken als Störungen auszufiltern.</small>
+              </label>
+            </details>
+
+            <div class="line-detection-status" aria-live="polite">
+              <span id="line-state-message">Kamera und Farbschwelle werden geprüft.</span>
+              <span class="line-measurements"><strong id="line-position">—</strong><span id="line-area">Keine Linie</span></span>
+            </div>
+
+            <div class="autonomy-actions">
+              <button id="line-apply" class="secondary-button" type="button">Einstellungen anwenden</button>
+              <button id="line-start" class="primary-button" type="button" disabled>Linienfolge starten</button>
+              <button id="line-stop" class="stop-button" type="button" hidden>Stoppen</button>
+            </div>
+
+            <div id="battery-readout" class="battery-readout" aria-live="polite">
+              <span class="battery-icon" aria-hidden="true"></span>
+              <span class="battery-copy"><span class="battery-values"><strong id="battery-percent">Warte auf Rover …</strong><span id="battery-voltage" class="battery-voltage"></span></span></span>
+            </div>
+          </div>
+        </section>
+
+      </section>
+
+      <footer class="page-footer">
+        <span>WAVE ROVER <span class="footer-separator">/</span> AUTONOME LINIENFOLGE</span>
+        <span class="footer-right"><a href="/api/v1/openapi.json">API &amp; OpenAPI</a><span>START ERST NACH ERKENNUNG</span></span>
+      </footer>
+    </main>
+  </body>
+</html>
