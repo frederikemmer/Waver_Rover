@@ -5,7 +5,6 @@ const cameraViewport = document.querySelector(".camera-viewport");
 const cameraResolution = document.getElementById("camera-resolution");
 const cameraPlaceholder = document.getElementById("camera-placeholder");
 const cameraStatus = document.getElementById("camera-status");
-const cameraLiveLabel = document.getElementById("camera-live-label");
 const driveStatus = document.getElementById("drive-status");
 const batteryReadout = document.getElementById("battery-readout");
 const batteryPercent = document.getElementById("battery-percent");
@@ -429,26 +428,18 @@ async function refreshStatus() {
 
     if (camera.state === "online") {
       setStatus(cameraStatus, "ready", "Kamera bereit");
-      cameraLiveLabel.classList.remove("is-offline");
-      cameraLiveLabel.querySelector("span:last-child").textContent = "LIVE";
       cameraFeed.classList.add("loaded");
       cameraPlaceholder.hidden = true;
     } else if (camera.state === "disabled") {
       setStatus(cameraStatus, "warning", "Kamera deaktiviert");
-      cameraLiveLabel.classList.add("is-offline");
-      cameraLiveLabel.querySelector("span:last-child").textContent = "STANDBY";
       cameraFeed.classList.remove("loaded");
       cameraPlaceholder.hidden = false;
     } else if (camera.state === "offline") {
       setStatus(cameraStatus, "warning", "Kamera offline");
-      cameraLiveLabel.classList.add("is-offline");
-      cameraLiveLabel.querySelector("span:last-child").textContent = "OFFLINE";
       cameraFeed.classList.remove("loaded");
       cameraPlaceholder.hidden = false;
     } else {
       setStatus(cameraStatus, "waiting", "Verbinde …");
-      cameraLiveLabel.classList.add("is-offline");
-      cameraLiveLabel.querySelector("span:last-child").textContent = "WARTET";
       cameraFeed.classList.remove("loaded");
       cameraPlaceholder.hidden = false;
     }
@@ -456,8 +447,6 @@ async function refreshStatus() {
     updateBattery({ state: "stale" });
     setStatus(driveStatus, "warning", "Rover nicht erreichbar");
     setStatus(cameraStatus, "warning", "Verbindung verloren");
-    cameraLiveLabel.classList.add("is-offline");
-    cameraLiveLabel.querySelector("span:last-child").textContent = "OFFLINE";
   }
 }
 

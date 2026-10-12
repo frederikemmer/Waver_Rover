@@ -23,7 +23,10 @@
             <a class="mode-link" href="/">Manuell</a>
             <a class="mode-link" href="/autonomy" aria-current="page">Autonom</a>
           </nav>
-          <span class="topbar-caption">LOKALE VERBINDUNG</span>
+          <div id="battery-readout" class="battery-readout" aria-live="polite" aria-label="Akkustand">
+            <span class="battery-icon" aria-hidden="true"></span>
+            <span class="battery-copy"><span class="battery-values"><strong id="battery-percent">Warte auf Rover …</strong><span id="battery-voltage" class="battery-voltage"></span></span></span>
+          </div>
         </div>
       </header>
 
@@ -53,26 +56,50 @@
                 <span>Die Kamera wird direkt vom Rover gestreamt.</span>
               </div>
               <img id="camera-feed" src="/api/v1/camera.mjpg" alt="Livebild der Rover-Kamera">
-              <span id="camera-live-label" class="camera-overlay-label is-offline">
-                <span class="live-dot"></span><span>STANDBY</span>
-              </span>
+              <img id="line-mask" src="/api/v1/autonomy/line/preview.mjpg" alt="" aria-hidden="true">
               <span id="color-pick-target" class="color-pick-target" hidden>Farbpunkt im Bild antippen</span>
               <svg id="line-overlay" class="line-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <marker id="line-guidance-arrowhead" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" markerUnits="userSpaceOnUse" orient="auto">
+                    <path d="M0,0 L6,3 L0,6 Z"></path>
+                  </marker>
+                </defs>
                 <rect id="line-roi-overlay" x="0" y="58" width="100" height="42"></rect>
                 <line id="line-center-overlay" x1="50" y1="0" x2="50" y2="100"></line>
-                <circle id="line-target-overlay" cx="50" cy="82" r="2.2" hidden></circle>
+                <line id="line-axis-outline" x1="50" y1="70" x2="50" y2="90" hidden></line>
+                <line id="line-axis-overlay" x1="50" y1="70" x2="50" y2="90" hidden></line>
+                <circle id="line-axis-far-marker" cx="50" cy="70" r="0.85" hidden></circle>
+                <line id="line-guidance-arrow" x1="50" y1="96" x2="50" y2="70" marker-end="url(#line-guidance-arrowhead)" hidden></line>
+                <circle id="line-target-overlay" cx="50" cy="82" r="1.7" hidden></circle>
+              </svg>
+              <div class="roi-control" role="group" aria-label="Beginn des Suchbereichs einstellen">
+                <label class="roi-control-label" for="line-roi-top"><strong id="line-roi-value">58 %</strong></label>
+                <input id="line-roi-top" type="range" min="0" max="100" step="1" value="58" aria-label="Beginn der Liniensuche im Bild">
+              </div>
+              <svg class="roi-thumb-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <line id="line-roi-track-marker" x1="98" y1="0" x2="98" y2="100" vector-effect="non-scaling-stroke"></line>
+                <ellipse id="line-roi-thumb-marker" cx="98" cy="58" rx="0.8" ry="1" vector-effect="non-scaling-stroke"></ellipse>
               </svg>
             </div>
-          </section>
-
-          <section class="panel line-vision-card" aria-labelledby="line-mask-title">
-            <div class="panel-heading line-vision-heading">
-              <div><h2 id="line-mask-title">Erkennungsmaske</h2><p>Weiß zeigt erkannte Farbflächen; der grüne Kreis markiert die Ziellinie.</p></div>
-              <span id="line-fps" class="line-fps">— FPS</span>
+            <div class="mask-overlay-controls">
+              <label class="mask-toggle" for="mask-overlay-enabled">
+                <input id="mask-overlay-enabled" type="checkbox" checked>
+                <span>Erkennung einblenden</span>
+              </label>
+              <label class="mask-opacity-control" for="mask-overlay-opacity">
+                <span>Deckkraft <strong id="mask-overlay-opacity-value">60 %</strong></span>
+                <input id="mask-overlay-opacity" type="range" min="0" max="100" step="5" value="60" aria-label="Deckkraft der Erkennungsmaske">
+              </label>
             </div>
-            <div class="line-mask-viewport">
-              <div id="line-mask-placeholder">Warte auf OpenCV-Auswertung …</div>
-              <img id="line-mask" src="/api/v1/autonomy/line/preview.mjpg" alt="Von OpenCV erkannte Farbflächen">
+            <div class="line-guidance-legend">
+              <div class="line-guidance-keys" aria-label="Legende zum Kamera-Overlay">
+                <span class="line-guidance-key"><i class="legend-mask" aria-hidden="true"></i>Türkis: Farberkennung</span>
+                <span class="line-guidance-key"><i class="legend-axis" aria-hidden="true"></i>Grün: Achse · Weiß: fern</span>
+                <span class="line-guidance-key"><i class="legend-target" aria-hidden="true"></i>Gelb: naher Zielpunkt</span>
+                <span class="line-guidance-key"><i class="legend-center" aria-hidden="true"></i>Gepunktet: Rover-Vorderachse</span>
+                <span class="line-guidance-key"><i class="legend-turn" aria-hidden="true"></i>Orange: Lenkimpuls</span>
+              </div>
+              <output id="line-steering-readout" class="line-steering-readout" title="Relative Lenkstärke aus den angeforderten Radgeschwindigkeiten, kein gemessener Drehwinkel.">Lenkbefehl: —</output>
             </div>
           </section>
         </div>
@@ -83,12 +110,11 @@
           <div class="panel-heading autonomy-heading">
             <h2 id="line-controls-title">Linienfolge</h2>
             <span id="line-state-pill" class="status-pill status-waiting">
-              <span class="status-dot"></span><span>Warte auf Kamera</span>
+              <span class="status-dot"></span><span>Linie · —</span>
             </span>
+            <span id="line-state-message" class="sr-only" aria-live="polite">Kamera und Farbschwelle werden geprüft.</span>
           </div>
           <div class="autonomy-control-content">
-            <p class="autonomy-intro">Gleichfarbige Flächen können ebenfalls erkannt werden. Prüfe die Maske vor „Start“.</p>
-
             <div class="line-choice-grid">
               <label class="field-label" for="line-color">
                 <span>Linienfarbe</span>
@@ -103,10 +129,11 @@
                 </select>
               </label>
               <label class="field-label" for="line-mode">
-                <span>Linienart</span>
+                <span>Erkennungsart</span>
                 <select id="line-mode">
-                  <option value="single">Einzelne Linie</option>
-                  <option value="between">Zwischen zwei Linien</option>
+                  <option value="area">Fläche</option>
+                  <option value="single" selected>Linie</option>
+                  <option value="between">Doppellinie</option>
                 </select>
               </label>
               <label id="between-strategy-field" class="field-label" for="between-strategy" hidden>
@@ -121,11 +148,26 @@
             <div class="color-picker-row">
               <button id="color-pick-button" class="secondary-button" type="button">Farbe im Livebild auswählen</button>
               <div class="color-sample" aria-live="polite">
-                <canvas id="color-swatch" class="color-swatch" width="23" height="23" aria-hidden="true"></canvas>
-                <span id="color-sample-values">Kein Farbpunkt gewählt</span>
+                <canvas id="color-swatch" class="color-swatch" width="34" height="16" aria-hidden="true"></canvas>
+                <span id="color-sample-values">H 0–179 · S 0–85 · V 150–255</span>
               </div>
             </div>
-            <p id="color-picker-hint" class="color-picker-hint">Farbpunkt auswählen; die Bereiche werden um den Messwert gesetzt.</p>
+            <details class="config-transfer">
+              <summary>Erkennungskonfiguration · JSON</summary>
+              <div class="config-transfer-content">
+                <label for="line-config-json">JSON kopieren, einfügen oder als Datei laden</label>
+                <textarea id="line-config-json" rows="6" spellcheck="false" placeholder="JSON hier einfügen …"></textarea>
+                <input id="line-config-file" class="sr-only" type="file" accept=".json,application/json" aria-label="JSON-Konfiguration hochladen">
+                <div class="config-transfer-actions">
+                  <button id="line-config-copy" class="secondary-button" type="button">In Zwischenablage kopieren</button>
+                  <button id="line-config-download" class="secondary-button" type="button">JSON herunterladen</button>
+                  <button id="line-config-upload" class="secondary-button" type="button">JSON-Datei laden</button>
+                  <button id="line-config-apply" class="secondary-button" type="button" disabled>Konfiguration übernehmen</button>
+                </div>
+                <span id="line-config-message" class="config-transfer-message" role="status" aria-live="polite">Enthält Farbbereich, Erkennungsart, Suchstart, Geschwindigkeit und Lenkung.</span>
+              </div>
+            </details>
+            <span id="color-picker-hint" class="sr-only" aria-live="polite"></span>
 
             <div class="speed-control autonomy-speed">
               <div class="speed-heading">
@@ -139,47 +181,35 @@
               <div class="speed-scale"><span>0 %</span><span>100 %</span></div>
             </div>
 
-            <label class="range-setting" for="line-roi-top">
-              <span><span>Bildbereich auswerten</span><strong id="line-roi-value">ab 58 % Bildhöhe</strong></span>
-              <input id="line-roi-top" type="range" min="25" max="85" step="1" value="58">
-              <small>Nur der untere Teil des Kamerabilds wird nach der Linie durchsucht.</small>
-            </label>
-
             <details class="advanced-settings">
-              <summary>Farb- und Reglerfeineinstellung</summary>
+              <summary><span>Farb- und Reglerfeineinstellung</span><small class="opencv-note">OpenCV · H 0–179 · S/V 0–255</small></summary>
               <div class="hsv-grid">
                 <div class="threshold-field">
-                  <span>Farbtonbereich <small>Min. / Max.</small></span>
+                  <span>Farbtonbereich <small id="h-range-summary">Min 0 / Max 179</small></span>
                   <div class="dual-range" data-range-key="h">
                     <div class="dual-range-rail" aria-hidden="true"></div>
+                    <svg class="range-color-markers" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><ellipse data-range-endpoint="min" cx="2.5" cy="12" rx="2.3" ry="7.5" vector-effect="non-scaling-stroke"></ellipse><ellipse data-range-endpoint="max" cx="97.5" cy="12" rx="2.3" ry="7.5" vector-effect="non-scaling-stroke"></ellipse></svg>
                     <input id="h-min" class="range-handle range-handle-min" type="range" min="0" max="179" value="0" aria-label="Farbtonbereich Minimum">
                     <input id="h-max" class="range-handle range-handle-max" type="range" min="0" max="179" value="179" aria-label="Farbtonbereich Maximum">
-                    <output id="h-min-value" class="range-bubble range-bubble-min" data-position="0">0</output>
-                    <output id="h-max-value" class="range-bubble range-bubble-max" data-position="100">179</output>
                   </div>
-                  <small>OpenCV 0–179; der Bereich darf über 179 auf 0 wechseln.</small>
                 </div>
                 <div class="threshold-field">
-                  <span>Sättigungsbereich <small>Min. / Max.</small></span>
+                  <span>Sättigungsbereich <small id="s-range-summary">Min 0 / Max 85</small></span>
                   <div class="dual-range" data-range-key="s">
                     <div class="dual-range-rail" aria-hidden="true"></div>
+                    <svg class="range-color-markers" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><ellipse data-range-endpoint="min" cx="2.5" cy="12" rx="2.3" ry="7.5" vector-effect="non-scaling-stroke"></ellipse><ellipse data-range-endpoint="max" cx="34" cy="12" rx="2.3" ry="7.5" vector-effect="non-scaling-stroke"></ellipse></svg>
                     <input id="s-min" class="range-handle range-handle-min" type="range" min="0" max="255" value="0" aria-label="Sättigungsbereich Minimum">
                     <input id="s-max" class="range-handle range-handle-max" type="range" min="0" max="255" value="85" aria-label="Sättigungsbereich Maximum">
-                    <output id="s-min-value" class="range-bubble range-bubble-min" data-position="0">0</output>
-                    <output id="s-max-value" class="range-bubble range-bubble-max" data-position="33">85</output>
                   </div>
-                  <small>OpenCV 0–255.</small>
                 </div>
                 <div class="threshold-field">
-                  <span>Helligkeitsbereich <small>Min. / Max.</small></span>
+                  <span>Helligkeitsbereich <small id="v-range-summary">Min 150 / Max 255</small></span>
                   <div class="dual-range" data-range-key="v">
                     <div class="dual-range-rail" aria-hidden="true"></div>
+                    <svg class="range-color-markers" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><ellipse data-range-endpoint="min" cx="58" cy="12" rx="2.3" ry="7.5" vector-effect="non-scaling-stroke"></ellipse><ellipse data-range-endpoint="max" cx="97.5" cy="12" rx="2.3" ry="7.5" vector-effect="non-scaling-stroke"></ellipse></svg>
                     <input id="v-min" class="range-handle range-handle-min" type="range" min="0" max="255" value="150" aria-label="Helligkeitsbereich Minimum">
                     <input id="v-max" class="range-handle range-handle-max" type="range" min="0" max="255" value="255" aria-label="Helligkeitsbereich Maximum">
-                    <output id="v-min-value" class="range-bubble range-bubble-min" data-position="59">150</output>
-                    <output id="v-max-value" class="range-bubble range-bubble-max" data-position="100">255</output>
                   </div>
-                  <small>OpenCV 0–255.</small>
                 </div>
               </div>
               <label class="range-setting compact-range" for="line-gain">
@@ -194,20 +224,9 @@
               </label>
             </details>
 
-            <div class="line-detection-status" aria-live="polite">
-              <span id="line-state-message">Kamera und Farbschwelle werden geprüft.</span>
-              <span class="line-measurements"><strong id="line-position">—</strong><span id="line-area">Keine Linie</span></span>
-            </div>
-
             <div class="autonomy-actions">
-              <button id="line-apply" class="secondary-button" type="button">Einstellungen anwenden</button>
               <button id="line-start" class="primary-button" type="button" disabled>Linienfolge starten</button>
               <button id="line-stop" class="stop-button" type="button" hidden>Stoppen</button>
-            </div>
-
-            <div id="battery-readout" class="battery-readout" aria-live="polite">
-              <span class="battery-icon" aria-hidden="true"></span>
-              <span class="battery-copy"><span class="battery-values"><strong id="battery-percent">Warte auf Rover …</strong><span id="battery-voltage" class="battery-voltage"></span></span></span>
             </div>
           </div>
         </section>
@@ -216,7 +235,7 @@
 
       <footer class="page-footer">
         <span>WAVE ROVER <span class="footer-separator">/</span> AUTONOME LINIENFOLGE</span>
-        <span class="footer-right"><a href="/api/v1/openapi.json">API &amp; OpenAPI</a><span>START ERST NACH ERKENNUNG</span></span>
+        <span class="footer-right"><a href="/api/v1/openapi.json">API &amp; OpenAPI</a></span>
       </footer>
     </main>
   </body>

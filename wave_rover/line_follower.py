@@ -82,6 +82,11 @@ class LineFollower:
             "boundary_right_x_percent": None,
             "steering_error": None,
             "heading_error": None,
+            "line_angle_degrees": None,
+            "line_axis_far_x_percent": None,
+            "line_axis_far_y_percent": None,
+            "line_axis_near_x_percent": None,
+            "line_axis_near_y_percent": None,
             "area_percent": 0.0,
             "fps": 0.0,
             "width": None,
@@ -142,8 +147,8 @@ class LineFollower:
         config["color_preset"] = preset
 
         mode = payload.get("line_mode", config["line_mode"])
-        if mode not in ("single", "between"):
-            raise ValueError("line_mode muss 'single' oder 'between' sein.")
+        if mode not in ("area", "single", "between"):
+            raise ValueError("line_mode muss 'area', 'single' oder 'between' sein.")
         config["line_mode"] = mode
 
         strategy = payload.get("between_strategy", config["between_strategy"])
@@ -158,7 +163,7 @@ class LineFollower:
             "s_max": (0, 255),
             "v_min": (0, 255),
             "v_max": (0, 255),
-            "roi_top_percent": (25, 85),
+            "roi_top_percent": (0, 100),
             "speed_percent": (0, 100),
         }
         for key, (minimum, maximum) in int_limits.items():
@@ -413,10 +418,14 @@ class LineFollower:
             moments = cv2.moments(contour)
             if moments["m00"] <= 0:
                 continue
+            rectangle_width, rectangle_height = cv2.minAreaRect(contour)[1]
+            long_side = max(rectangle_width, rectangle_height)
+            short_side = max(1.0, min(rectangle_width, rectangle_height))
             components.append({
                 "x": float(moments["m10"] / moments["m00"]),
                 "y": float(moments["m01"] / moments["m00"]),
                 "area": area,
+                "elongation": float(long_side / short_side),
                 "contour": contour,
             })
 
@@ -424,21 +433,26 @@ class LineFollower:
         target_x: float | None = None
         target_y: float | None = None
         target_area = 0.0
-        if config["line_mode"] == "single":
+        if config["line_mode"] == "area":
             if components:
                 selected = [max(components, key=lambda part: part["area"])]
         else:
-            pairs: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
-            ordered = sorted(components, key=lambda part: part["x"])
-            for index, left in enumerate(ordered):
-                for right in ordered[index + 1:]:
-                    separation = right["x"] - left["x"]
-                    if width * 0.16 <= separation <= width * 0.9:
-                        score = left["area"] + right["area"] + separation * 0.2
-                        pairs.append((score, left, right))
-            if pairs:
-                _score, left, right = max(pairs, key=lambda pair: pair[0])
-                selected = [left, right]
+            line_components = [part for part in components if part["elongation"] >= 2.2]
+            if config["line_mode"] == "single":
+                if line_components:
+                    selected = [max(line_components, key=lambda part: part["area"])]
+            else:
+                ordered = sorted(line_components, key=lambda part: part["x"])
+                pairs: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
+                for index, left in enumerate(ordered):
+                    for right in ordered[index + 1:]:
+                        separation = right["x"] - left["x"]
+                        if width * 0.16 <= separation <= width * 0.9:
+                            score = left["area"] + right["area"] + separation * 0.2
+                            pairs.append((score, left, right))
+                if pairs:
+                    _score, left, right = max(pairs, key=lambda pair: pair[0])
+                    selected = [left, right]
 
         if selected:
             if config["line_mode"] == "between" and len(selected) == 2:
@@ -460,38 +474,49 @@ class LineFollower:
         detected = target_x is not None
         steering_error = None
         heading_error = None
+        line_angle_degrees = None
+        line_axis: tuple[tuple[float, float], tuple[float, float]] | None = None
         if target_x is not None:
             steering_error = (width / 2.0 - target_x) / (width / 2.0)
             if config["line_mode"] == "single" and selected:
-                contour_points = selected[0]["contour"].reshape(-1, 2)
-                point_y = contour_points[:, 1]
+                contour_points = selected[0]["contour"].reshape(-1, 2).astype(np.float32)
                 point_x = contour_points[:, 0]
-                if len(point_y) >= 8 and float(point_y.max() - point_y.min()) >= 8:
-                    near_cut = float(np.quantile(point_y, 0.72))
-                    far_cut = float(np.quantile(point_y, 0.28))
-                    near_points = point_x[point_y >= near_cut]
-                    far_points = point_x[point_y <= far_cut]
-                    near_x = float(np.median(near_points)) if len(near_points) else selected[0]["x"]
-                    far_x = float(np.median(far_points)) if len(far_points) else selected[0]["x"]
-                else:
-                    near_x = far_x = selected[0]["x"]
-                lateral_error = (width / 2.0 - near_x) / (width / 2.0)
-                heading_error = max(-1.0, min(1.0, (near_x - far_x) / (width / 2.0)))
-                # Weight the part nearest the Rover more strongly, then add a
-                # smaller look-ahead term so an offset line and a bend both
-                # produce a useful steering correction.
-                steering_error = lateral_error * 1.15 + heading_error * 0.35
+                point_y = contour_points[:, 1]
+                if len(contour_points) >= 8:
+                    vx, vy, x0, y0 = cv2.fitLine(
+                        contour_points, cv2.DIST_L2, 0, 0.01, 0.01
+                    ).reshape(-1)
+                    if vy < 0:
+                        vx, vy = -vx, -vy
+                    projections = (point_x - float(x0)) * float(vx) + (point_y - float(y0)) * float(vy)
+                    far_projection, near_projection = np.quantile(projections, (0.2, 0.8))
+                    far_x = float(x0 + vx * far_projection)
+                    far_y = float(y0 + vy * far_projection)
+                    near_x = float(x0 + vx * near_projection)
+                    near_y = float(y0 + vy * near_projection)
+                    if near_y - far_y >= 8:
+                        half_width = width / 2.0
+                        heading_error = max(-1.0, min(1.0, (near_x - far_x) / half_width))
+                        line_angle_degrees = math.degrees(
+                            math.atan2(near_x - far_x, near_y - far_y)
+                        )
+                        line_axis = (
+                            (far_x, far_y + roi_y),
+                            (near_x, near_y + roi_y),
+                        )
+                        # Average the line's near position and its fitted direction so
+                        # the Rover aims along the marking instead of at its centroid.
+                        lateral_error = (width / 2.0 - near_x) / half_width
+                        steering_error = (lateral_error + heading_error) / 2.0
+                        target_x, target_y = near_x, near_y
             steering_error = max(-1.0, min(1.0, steering_error))
 
-        preview_mask = np.zeros((height, width), dtype=np.uint8)
-        preview_mask[roi_y:, :] = mask
-        preview = cv2.cvtColor(preview_mask, cv2.COLOR_GRAY2BGR)
-        cv2.line(preview, (width // 2, 0), (width // 2, height - 1), (96, 96, 96), 1)
-        cv2.line(preview, (0, roi_y), (width - 1, roi_y), (255, 160, 0), 1)
-        if detected and target_x is not None and target_y is not None:
-            point = (round(target_x), round(target_y + roi_y))
-            cv2.circle(preview, point, 8, (0, 255, 0), 2)
-            cv2.line(preview, (point[0] - 12, point[1]), (point[0] + 12, point[1]), (0, 255, 0), 2)
+        preview = np.zeros((height, width, 3), dtype=np.uint8)
+        detected_pixels = np.zeros_like(frame[roi_y:, :])
+        detected_pixels[mask > 0] = (255, 220, 48)
+        preview[roi_y:, :] = detected_pixels
+        cv2.line(preview, (width // 2, 0), (width // 2, height - 1), (92, 92, 92), 1)
+        cv2.line(preview, (0, roi_y), (width - 1, roi_y), (255, 255, 48), 2)
         encoded, buffer = cv2.imencode(
             ".jpg", preview, [int(cv2.IMWRITE_JPEG_QUALITY), 72]
         )
@@ -511,6 +536,25 @@ class LineFollower:
             ),
             "steering_error": round(steering_error, 4) if steering_error is not None else None,
             "heading_error": round(heading_error, 4) if heading_error is not None else None,
+            "line_angle_degrees": (
+                round(line_angle_degrees, 1) if line_angle_degrees is not None else None
+            ),
+            "line_axis_far_x_percent": (
+                round(max(0.0, min(100.0, line_axis[0][0] / width * 100)), 1)
+                if line_axis is not None else None
+            ),
+            "line_axis_far_y_percent": (
+                round(max(0.0, min(100.0, line_axis[0][1] / height * 100)), 1)
+                if line_axis is not None else None
+            ),
+            "line_axis_near_x_percent": (
+                round(max(0.0, min(100.0, line_axis[1][0] / width * 100)), 1)
+                if line_axis is not None else None
+            ),
+            "line_axis_near_y_percent": (
+                round(max(0.0, min(100.0, line_axis[1][1] / height * 100)), 1)
+                if line_axis is not None else None
+            ),
             "area_percent": round(target_area / roi_area * 100, 2),
             "contour_count": len(components),
             "width": width,

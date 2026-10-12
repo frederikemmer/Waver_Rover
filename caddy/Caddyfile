@@ -1,0 +1,7 @@
+# WAVE ROVER managed Caddy configuration
+wave-rover.local {
+	tls internal
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}

@@ -1,6 +1,6 @@
 # Design Scope and Roadmap
 
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 
 This is the living product and technical scope for the WAVE ROVER student
 project. Record later requirements and decisions here so that the intended
@@ -54,15 +54,16 @@ them in student code.
 - Set the requested speed from 0–100% using either a slider or direct number entry.
 - Select common camera resolutions through the camera's full sensor resolution.
 - Keep the resolution selector beside the live-image title. Remove duplicate
-  section labels, camera metadata footer text, and camera-frame corner marks.
+  section labels, camera metadata footer text, the in-frame LIVE badge, and
+  camera-frame corner marks.
 - On desktop, place an adjustable splitter between the wider camera panel and
   the fixed-width control panel; support pointer dragging and keyboard arrows.
   Stack the panels and hide the splitter on narrow screens.
 - Expose a versioned HTTP API for motor commands, battery telemetry, camera
   controls, and status, with a machine-readable OpenAPI contract.
-- Show the coarse battery percentage estimate with the measured voltage beside
-  it. Use `~` to mark the estimate and a subtle icon color for reading freshness.
-  Omit separate battery labels and freshness text.
+- Show the coarse battery percentage estimate and measured voltage together in
+  the shared header. Use `~` to mark the estimate and a subtle icon color for
+  reading freshness. Omit separate battery labels and freshness text.
 - Omit the extra press-to-drive instruction and the separate safety-status line;
   keep the keyboard key legend visible.
 - Provide an expandable API guide with searchable endpoints, short explanations,
@@ -76,22 +77,45 @@ them in student code.
 
 - Provide a separate Autonom page alongside manual control.
 - Analyze camera frames on the Raspberry Pi in Python with OpenCV.
-- Follow either one selected-color line or two same-color boundaries. Single
-  line steering combines near-image lateral offset with a smaller look-ahead
-  heading estimate to turn toward the line instead of tracking parallel to it.
+- Let the user choose between a colored area, one line, and a double line.
+  Single-line mode is the default; it filters out broad color patches and
+  steers using near-image lateral offset plus a smaller look-ahead heading
+  estimate. Area detection is available only when explicitly selected.
+- In double-line mode, select two separated line-shaped components as course
+  boundaries. Offer midpoint tracking and a corridor mode that steers inward
+  only when the image center leaves the pair.
 - Offer color presets and live-image color picking. Picking samples a 5×5 pixel
   neighborhood, converts its median color to OpenCV HSV, and initializes three
   dual-ended ranges for hue, saturation, and brightness. Hue may wrap through
   179 to 0.
-- For two boundaries, offer midpoint tracking and a corridor mode that steers
-  inward only when the image center leaves the pair.
 - Offer lower-image analysis region, minimum detected area, steering
   sensitivity, and forward speed.
-- Keep the camera and mask in one resizable desktop column, with the controls
-  alongside it. Keep the camera column at least 400 px wide and cap the
-  settings column at 480 px so a wide settings panel cannot squeeze the mask.
-  Preserve the mask image proportions and stack camera, settings, and mask on
-  narrow screens.
+- Show the selected detection mode and its horizontal image position in the
+  autonomy heading. Keep explanatory state details available to assistive
+  technology and on focus, without a second visible status panel.
+- Keep the OpenCV value ranges beside the expandable color and controller
+  settings heading rather than repeating that note beneath every range.
+- Show the active HSV color inside each dual-range handle and update its
+  position and fill while the range is dragged.
+- Always show the configured HSV minimum and maximum colors with their full
+  H/S/V bounds beside the live-image color picker, including before a color is
+  sampled.
+- Provide a collapsed JSON configuration section beside the color picker for
+  clipboard copy, JSON download, paste, and JSON file upload. Validate imports
+  and apply them through the line-configuration API.
+- Overlay the OpenCV color-detection preview directly on the live camera image.
+  Use black outside detected regions so the browser can screen-blend the
+  overlay with the camera. Provide a visibility checkbox and opacity slider;
+  remove the separate mask panel.
+- Place a vertical search-region slider along the full camera-image height.
+  Center its custom thumb on its subtle edge track and align it with the
+  horizontal marker showing where line detection begins.
+- Send changed line-following settings automatically after a short debounce.
+  Keep Start disabled until the latest settings are accepted, and lock behavior
+  settings while the follower is active.
+- Keep the camera and settings in one resizable desktop layout. Keep the camera
+  column at least 400 px wide and cap the settings column at 480 px. Stack the
+  camera and settings on narrow screens.
 - Keep autonomy disarmed by default. Start only after the current frame detects
   the configured line; stop immediately if the line or camera is lost.
 - Stop autonomy when the page is left, when the manual drive API takes control,
@@ -114,9 +138,9 @@ traffic-sign state machines in Python modules on the rover.
 
 ## Current technical decisions
 
-1. **Python serves the interface on the Pi.** This keeps the control path local
-   to the rover and leaves students one language for web endpoints, camera
-   processing, and behavior code.
+1. **Caddy terminates local HTTPS and proxies to the Python service.** This
+   keeps the control path local to the rover while leaving students one language
+   for web endpoints, camera processing, and behavior code.
 2. **Use the existing Waveshare controller.** The Pi sends JSON commands to
    the ESP32 over GPIO UART; the Pi does not generate motor PWM itself.
 3. **Use a narrow web service with one vision dependency.** HTTP and control
@@ -133,11 +157,13 @@ traffic-sign state machines in Python modules on the rover.
    the server retains an independent configurable cap.
 6. **Keep one process in charge of the rover UART.** Do not run a second
    Waveshare or student drive process against the same serial device.
-7. **Run as a systemd service on port 8080.** This avoids relying on a terminal
-   remaining open and leaves Waveshare's usual port 5000 available if that
-   software is later installed.
+7. **Run Caddy on HTTPS port 443 and redirect HTTP port 80.** Caddy uses an
+   internal CA for `wave-rover.local`; clients must trust its root certificate.
+   The Python service stays on localhost port 8080. Waveshare's usual port 5000
+   remains available if that software is later installed.
 8. **Limit the current UI to a trusted local network.** There is no user login
-   in this teaching prototype. Do not expose port 8080 to the public internet.
+   in this teaching prototype. Do not expose the control interface to the
+   public internet.
 9. **Make the service API the student integration boundary.** Publish the
    endpoint contract as OpenAPI and keep sole ownership of the rover UART in
    the Python service.
@@ -160,8 +186,9 @@ traffic-sign state machines in Python modules on the rover.
 ### M1 — Bachelor line-following practical (current)
 
 - Read camera frames in the Python OpenCV vision module.
-- Detect one colored line or two same-color lane boundaries and estimate the
-  rover's lateral error.
+- Let students choose an optional color area, a single elongated line
+  (default), or two separated line-shaped boundaries, then estimate the rover's
+  lateral error.
 - Convert that error into bounded differential wheel commands while following.
 - Tune color thresholds and the camera region from the browser's mask preview.
 - Stop safely when the lane or camera is lost; require an explicit restart.
@@ -207,22 +234,27 @@ traffic-sign state machines in Python modules on the rover.
 - Changing a camera preset restarts the UVC capture at the selected mode. The
   selection is runtime-only and returns to the configured startup resolution
   after the service restarts.
-- OpenCV line following now runs on the Pi 5 at about 20 processed frames per
-  second while the camera streams Full HD and the detector analyzes 640×360
-  frames. Synthetic white single-line and two-boundary images pass. A physical
-  floor-line course and steering direction have not yet been validated.
+- OpenCV line following was measured at about 20 processed frames per second
+  during a Full HD camera stream while analyzing 640×360 frames. Synthetic
+  white single-line and two-boundary images passed; a physical floor-line
+  course and steering direction have not yet been validated.
+- Default single-line mode now accepts contours with a long-to-short shape ratio
+  of at least 2.2. The optional area mode skips that filter. This heuristic
+  rejects broad color patches but can still select a similarly shaped object;
+  check the camera overlay before arming.
 - The line-following controls now sample HSV from a point in the live image and
   use one dual-ended control for each HSV dimension. Single-line steering adds
   a near-to-far heading term; two-line mode can target the midpoint or remain
   inside the corridor. These steering changes are still awaiting physical
   course validation; autonomous movement has not been commanded.
-- The autonomy layout now groups camera and mask into one left column, protects
-  a 400 px minimum width, and caps the settings pane at 480 px. This keeps the
-  mask aligned with the camera as the splitter moves and stacked on phones.
-- The live view currently has one white-color component near 80% of image width.
-  It has not been confirmed as a course line. Students must inspect the mask
-  and target overlay before starting; color thresholding cannot distinguish a
-  tape line from another object with the same color.
+- The autonomy page now overlays the cyan detector visualization on the live
+  image, with opacity and search-region controls beside it. Settings are sent
+  automatically, and the separate cropped mask panel has been removed.
+- At the 2026-10-07 check, the current office view showed a default white-line
+  target near 54% of image width and nine threshold contours. This is not a
+  floor course line. Students must inspect the camera overlay and target marker
+  before starting; color thresholding cannot identify course markings by
+  meaning.
 - Automatic speed uses the same configured motor ceiling as manual mode. The
   default autonomy speed is 15%; students can tune it from the Autonom page.
 - The first camera view was nearly black. After the user removed the cap and
@@ -268,3 +300,5 @@ demo interface with a small student-oriented controller.
 | 2026-10-06 | Added a second Autonom page, OpenCV line and two-boundary following, adjustable HSV/ROI/gain/speed settings, a live detection mask, and fail-stop behavior on line or camera loss. Physical line-course tuning remains to be done. |
 | 2026-10-06 | Installed OpenCV on the Rover and verified the single-line and two-boundary detectors with synthetic images. A mock-drive run confirmed steering output and stop/disarm on line loss. The live camera is analyzed at about 20 FPS; no autonomous command has been sent to the physical Rover. |
 | 2026-10-07 | Added live-image color picking, combined HSV range controls, corridor strategy selection, look-ahead steering, and a shared resizable camera/mask column. Verified through local/browser and synthetic image checks; no autonomous motor command was sent. |
+| 2026-10-07 | Added explicit Fläche/Linie/Doppellinie modes with line-shape filtering for the default, color-filled HSV slider handles, a compact header status and battery readout, and removed duplicate camera/status captions. Synthetic checks on the Pi recognized a vertical line and line pair near image center, rejected a square patch in Linie mode, and accepted it in Fläche mode. Desktop and phone layouts were reviewed; area and double-line API settings were accepted and restored. The rover remained manual with zero wheel requests; autonomous movement was not started. |
+| 2026-10-07 | Extended the image search-start control over the full camera height with a subtle edge treatment, centered its handle on the rail, and added a 0–100% range. Removed separate floating HSV value markers, showed Min/Max values beside each range title, and enlarged the single color-filled selection points so their fill and position are clear. |

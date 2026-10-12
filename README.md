@@ -1,8 +1,9 @@
 # WAVE ROVER Student Control
 
 Browser-based manual control and autonomous line following for the Waveshare
-WAVE ROVER. The web server, image analysis, and drive logic run on the Raspberry
-Pi in Python. The phone or laptop configures behavior and shows camera feedback.
+WAVE ROVER. The Python service handles control and image analysis on the
+Raspberry Pi; Caddy serves the interface over local HTTPS. The phone or laptop
+configures behavior and shows camera feedback.
 
 ## Current hardware
 
@@ -17,29 +18,22 @@ point.
 
 ## Install on the rover
 
-From a checkout on the Raspberry Pi:
+For a direct install from the public repository, run:
 
 ~~~bash
-sudo ./install.sh
+curl -fsSL https://github.com/frederikemmer/Waver_Rover/raw/master/install.sh | sudo bash
 ~~~
 
-The installer adds the Raspberry Pi OS OpenCV package, creates a Python virtual
-environment, installs a systemd service, and starts it. The service listens on
-port 8080. Open the address shown by the installer from a phone or laptop on
-the same network, for example:
+The installer adds the Raspberry Pi OS OpenCV package and Caddy, creates a
+Python virtual environment, and starts the Rover service behind Caddy. Open the
+HTTPS address from a phone or laptop on the same network:
 
 ~~~text
-http://wave-rover.local:8080
+https://wave-rover.local/
 ~~~
 
-Once this repository has a GitHub location, the intended single-command install
-is:
-
-~~~bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPOSITORY/main/install.sh | sudo bash -s -- --repo https://github.com/OWNER/REPOSITORY.git
-~~~
-
-Replace OWNER and REPOSITORY with the published repository name.
+For a clean student setup that updates Raspberry Pi OS without installing the
+finished rover application, see [docs/student-setup.md](docs/student-setup.md).
 
 ## Local development
 
@@ -61,9 +55,12 @@ serves its page and reports the hardware as disabled.
 - Set speed from 0 to 100 percent with the slider or numeric field.
 - The server applies its configured speed limit even if a client sends larger values.
 - Choose a live camera preset from VGA through the camera's full 5 MP resolution.
-- The **Autonom** page can follow one color line or stay centered between two
-  same-color boundaries. Tune the HSV mask before starting; the default speed
-  is 15%.
+- The **Autonom** page offers **Fläche**, **Linie** (default), and
+  **Doppellinie** detection. Line modes filter for elongated color components;
+  area tracking must be selected explicitly. The HSV detector overlays the live
+  image, and settings apply automatically; the default speed is 15%.
+- Battery voltage and a rough percentage estimate appear together in the shared
+  header.
 - Line following is disarmed by default and stops on line loss, stale camera
   frames, page exit, or manual control taking over.
 

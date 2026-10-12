@@ -23,7 +23,15 @@
             <a class="mode-link" href="/" aria-current="page">Manuell</a>
             <a class="mode-link" href="/autonomy">Autonom</a>
           </nav>
-          <span class="topbar-caption">LOKALE VERBINDUNG</span>
+          <div id="battery-readout" class="battery-readout" aria-live="polite" aria-label="Akkustand">
+            <span class="battery-icon" aria-hidden="true"></span>
+            <span class="battery-copy">
+              <span class="battery-values">
+                <strong id="battery-percent">Warte auf Rover …</strong>
+                <span id="battery-voltage" class="battery-voltage"></span>
+              </span>
+            </span>
+          </div>
         </div>
       </header>
 
@@ -54,9 +62,6 @@
               <span>Die Kamera wird direkt vom Rover gestreamt.</span>
             </div>
             <img id="camera-feed" src="/api/v1/camera.mjpg" alt="Livebild der Rover-Kamera">
-            <span id="camera-live-label" class="camera-overlay-label is-offline">
-              <span class="live-dot"></span><span>STANDBY</span>
-            </span>
           </div>
         </section>
 
@@ -108,15 +113,6 @@
               <div class="speed-scale"><span>0 %</span><span id="speed-maximum-label">100 %</span></div>
             </div>
 
-            <div id="battery-readout" class="battery-readout" aria-live="polite">
-              <span class="battery-icon" aria-hidden="true"></span>
-              <span class="battery-copy">
-                <span class="battery-values">
-                  <strong id="battery-percent">Warte auf Rover …</strong>
-                  <span id="battery-voltage" class="battery-voltage"></span>
-                </span>
-              </span>
-            </div>
           </div>
         </section>
 

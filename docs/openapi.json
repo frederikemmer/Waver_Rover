@@ -192,7 +192,7 @@
       "post": {
         "operationId": "configureLineAutonomy",
         "summary": "Apply line color and follower settings",
-        "description": "Configuration is evaluated continuously for the mask preview. It cannot be changed while following is active.",
+        "description": "The browser automatically submits settings after a short debounce. Settings cannot be changed while following is active.",
         "requestBody": {
           "required": true,
           "content": {
@@ -255,11 +255,11 @@
     },
     "/api/v1/autonomy/line/preview.mjpg": {
       "get": {
-        "operationId": "getLineMaskStream",
-        "summary": "Stream the current HSV threshold mask",
+        "operationId": "getLineDetectionOverlayStream",
+        "summary": "Stream the current line detection overlay",
         "responses": {
           "200": {
-            "description": "Multipart JPEG mask with ROI, image center, and detected target marker.",
+            "description": "Multipart JPEG overlay with cyan threshold hits on black, ROI boundary, and image center. The browser draws the selected target, the single-line fitted axis, an orange steering arrow, and a legend over the live camera image.",
             "content": {
               "multipart/x-mixed-replace; boundary=frame": {
                 "schema": { "type": "string", "format": "binary" }
@@ -372,7 +372,7 @@
         "type": "object",
         "properties": {
           "color_preset": { "type": "string", "enum": ["white", "black", "yellow", "red", "green", "blue", "custom"] },
-          "line_mode": { "type": "string", "enum": ["single", "between"] },
+          "line_mode": { "type": "string", "enum": ["area", "single", "between"], "default": "single", "description": "area selects the largest qualifying color component; single selects the largest elongated line component; between selects two separated elongated line components." },
           "between_strategy": { "type": "string", "enum": ["midpoint", "stay_between"], "default": "midpoint", "description": "For two boundaries, follow their midpoint or only steer back when the image center leaves the corridor." },
           "h_min": { "type": "integer", "minimum": 0, "maximum": 179, "description": "Hue lower bound. h_min > h_max selects the hue wrap interval." },
           "h_max": { "type": "integer", "minimum": 0, "maximum": 179 },
@@ -380,7 +380,7 @@
           "s_max": { "type": "integer", "minimum": 0, "maximum": 255 },
           "v_min": { "type": "integer", "minimum": 0, "maximum": 255 },
           "v_max": { "type": "integer", "minimum": 0, "maximum": 255 },
-          "roi_top_percent": { "type": "integer", "minimum": 25, "maximum": 85 },
+          "roi_top_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
           "speed_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
           "steering_gain": { "type": "number", "minimum": 0.2, "maximum": 2.5 },
           "min_area_percent": { "type": "number", "minimum": 0.05, "maximum": 5 }
@@ -389,16 +389,21 @@
       },
       "LineDetection": {
         "type": "object",
-        "required": ["line_detected", "line_count", "target_x_percent", "target_y_percent", "boundary_left_x_percent", "boundary_right_x_percent", "steering_error", "heading_error", "area_percent", "contour_count", "width", "height", "roi_top_percent", "fps", "frame_age_ms"],
+        "required": ["line_detected", "line_count", "target_x_percent", "target_y_percent", "boundary_left_x_percent", "boundary_right_x_percent", "steering_error", "heading_error", "line_angle_degrees", "line_axis_far_x_percent", "line_axis_far_y_percent", "line_axis_near_x_percent", "line_axis_near_y_percent", "area_percent", "contour_count", "width", "height", "roi_top_percent", "fps", "frame_age_ms"],
         "properties": {
-          "line_detected": { "type": "boolean" },
-          "line_count": { "type": "integer", "description": "1 for one line; 2 for a pair of boundaries." },
+          "line_detected": { "type": "boolean", "description": "True when the configured area, single-line, or double-line mode selects a target." },
+          "line_count": { "type": "integer", "description": "Selected color components: 0 for no target, 1 for area or single-line mode, 2 for double-line mode." },
           "target_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
           "target_y_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
           "boundary_left_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
           "boundary_right_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
-          "steering_error": { "type": ["number", "null"], "minimum": -1, "maximum": 1, "description": "Signed correction input combining near-line position and look-ahead heading in single mode; center offset in between mode." },
-          "heading_error": { "type": ["number", "null"], "minimum": -1, "maximum": 1, "description": "Single-line near-vs-far direction estimate; null for two-boundary mode or no line." },
+          "steering_error": { "type": ["number", "null"], "minimum": -1, "maximum": 1, "description": "Signed correction from the selected target; single-line mode equally averages near-line lateral offset and the fitted direction across the central 60% of the visible line, while area and double-line modes use target-center offset." },
+          "heading_error": { "type": ["number", "null"], "minimum": -1, "maximum": 1, "description": "Single-line normalized horizontal displacement from the far to near end of the fitted axis; null for area mode, double-line mode, or no target." },
+          "line_angle_degrees": { "type": ["number", "null"], "minimum": -90, "maximum": 90, "description": "Single-line fitted axis angle in degrees relative to image vertical; positive when the line shifts right toward the Rover. Null for area mode, double-line mode, or no target." },
+          "line_axis_far_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100, "description": "Horizontal image coordinate of the fitted line axis far endpoint; null when no single-line axis is available." },
+          "line_axis_far_y_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100, "description": "Vertical image coordinate of the fitted line axis far endpoint; null when no single-line axis is available." },
+          "line_axis_near_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100, "description": "Horizontal image coordinate of the fitted line axis near endpoint; null when no single-line axis is available." },
+          "line_axis_near_y_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100, "description": "Vertical image coordinate of the fitted line axis near endpoint; null when no single-line axis is available." },
           "area_percent": { "type": "number" },
           "contour_count": { "type": "integer" },
           "width": { "type": ["integer", "null"] },

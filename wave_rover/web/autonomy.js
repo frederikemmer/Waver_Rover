@@ -4,16 +4,13 @@ const cameraViewport = document.querySelector(".camera-viewport");
 const cameraFeed = document.getElementById("camera-feed");
 const cameraPlaceholder = document.getElementById("camera-placeholder");
 const cameraStatus = document.getElementById("camera-status");
-const cameraLiveLabel = document.getElementById("camera-live-label");
 const cameraResolution = document.getElementById("camera-resolution");
 const lineStatePill = document.getElementById("line-state-pill");
 const lineStateMessage = document.getElementById("line-state-message");
-const linePosition = document.getElementById("line-position");
-const lineArea = document.getElementById("line-area");
-const lineFps = document.getElementById("line-fps");
 const lineMask = document.getElementById("line-mask");
-const lineMaskViewport = document.querySelector(".line-mask-viewport");
-const lineMaskPlaceholder = document.getElementById("line-mask-placeholder");
+const maskOverlayEnabled = document.getElementById("mask-overlay-enabled");
+const maskOverlayOpacity = document.getElementById("mask-overlay-opacity");
+const maskOverlayOpacityValue = document.getElementById("mask-overlay-opacity-value");
 const lineColor = document.getElementById("line-color");
 const lineMode = document.getElementById("line-mode");
 const betweenStrategyField = document.getElementById("between-strategy-field");
@@ -23,13 +20,19 @@ const lineSpeedNumber = document.getElementById("line-speed-number");
 const lineRoiTop = document.getElementById("line-roi-top");
 const lineGain = document.getElementById("line-gain");
 const lineMinArea = document.getElementById("line-min-area");
-const lineApply = document.getElementById("line-apply");
 const lineStart = document.getElementById("line-start");
 const lineStop = document.getElementById("line-stop");
 const colorPickButton = document.getElementById("color-pick-button");
 const colorPickerHint = document.getElementById("color-picker-hint");
 const colorSampleValues = document.getElementById("color-sample-values");
 const colorSwatch = document.getElementById("color-swatch");
+const lineConfigJson = document.getElementById("line-config-json");
+const lineConfigFile = document.getElementById("line-config-file");
+const lineConfigCopy = document.getElementById("line-config-copy");
+const lineConfigDownload = document.getElementById("line-config-download");
+const lineConfigUpload = document.getElementById("line-config-upload");
+const lineConfigApply = document.getElementById("line-config-apply");
+const lineConfigMessage = document.getElementById("line-config-message");
 const colorPickTarget = document.getElementById("color-pick-target");
 const workspace = document.querySelector(".autonomy-workspace");
 const controlCard = document.querySelector(".autonomy-controls");
@@ -38,7 +41,14 @@ const batteryReadout = document.getElementById("battery-readout");
 const batteryPercent = document.getElementById("battery-percent");
 const batteryVoltage = document.getElementById("battery-voltage");
 const cameraRoiOverlay = document.getElementById("line-roi-overlay");
+const cameraRoiTrackMarker = document.getElementById("line-roi-track-marker");
+const cameraRoiThumbMarker = document.getElementById("line-roi-thumb-marker");
 const cameraTargetOverlay = document.getElementById("line-target-overlay");
+const lineAxisOutline = document.getElementById("line-axis-outline");
+const lineAxisOverlay = document.getElementById("line-axis-overlay");
+const lineAxisFarMarker = document.getElementById("line-axis-far-marker");
+const lineGuidanceArrow = document.getElementById("line-guidance-arrow");
+const lineSteeringReadout = document.getElementById("line-steering-readout");
 
 const HSV_PRESETS = {
   white: { h_min: 0, h_max: 179, s_min: 0, s_max: 85, v_min: 150, v_max: 255 },
@@ -62,6 +72,9 @@ let active = false;
 let saving = false;
 let initialized = false;
 let refreshing = false;
+let editRevision = 0;
+let configSaveTimer = null;
+let configSaveError = null;
 let lastCameraPreset = cameraResolution.value;
 let splitterPointerId = null;
 let splitterStartX = 0;
@@ -98,19 +111,103 @@ function updateBattery(battery) {
 
 function showSliderValues() {
   for (const [key, range] of Object.entries(hsvRanges)) {
+    document.getElementById(`${key}-range-summary`).textContent = `Min ${range.min.value} / Max ${range.max.value}`;
     for (const endpoint of ["min", "max"]) {
-      const input = range[endpoint];
-      const value = document.getElementById(`${key}-${endpoint}-value`);
-      const position = Math.round(Number(input.value) / range.limit * 100);
-      value.textContent = input.value;
-      value.dataset.position = String(position);
+      range[endpoint].setAttribute("aria-valuetext", `${endpoint === "min" ? "Minimum" : "Maximum"} ${range[endpoint].value}`);
     }
   }
-  document.getElementById("line-roi-value").textContent = `ab ${lineRoiTop.value} % Bildhöhe`;
+  updateRangeMarkers();
+  updateColorRangePreview();
+  updateRoiThumbPosition();
+  document.getElementById("line-roi-value").textContent = `${lineRoiTop.value} %`;
+  lineRoiTop.setAttribute("aria-valuetext", `Erkennung ab ${lineRoiTop.value} Prozent der Bildhöhe`);
   document.getElementById("line-gain-value").textContent = Number(lineGain.value).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   document.getElementById("line-area-value").textContent = `${Number(lineMinArea.value).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
   cameraRoiOverlay.setAttribute("y", lineRoiTop.value);
   cameraRoiOverlay.setAttribute("height", String(100 - Number(lineRoiTop.value)));
+}
+
+function updateRoiThumbPosition() {
+  const width = cameraViewport.clientWidth;
+  const height = cameraViewport.clientHeight;
+  if (!(width > 0 && height > 0)) return;
+  const xPercent = (width - 17) / width * 100;
+  cameraRoiTrackMarker.setAttribute("x1", xPercent.toFixed(3));
+  cameraRoiTrackMarker.setAttribute("x2", xPercent.toFixed(3));
+  cameraRoiThumbMarker.setAttribute("cx", xPercent.toFixed(3));
+  cameraRoiThumbMarker.setAttribute("cy", Number(lineRoiTop.value).toFixed(3));
+  cameraRoiThumbMarker.setAttribute("rx", (9 * 100 / width).toFixed(3));
+  cameraRoiThumbMarker.setAttribute("ry", (9 * 100 / height).toFixed(3));
+}
+
+function hsvToRgb(hue, saturation, value) {
+  const hueDegrees = ((Number(hue) * 2) % 360 + 360) % 360;
+  const normalizedHue = hueDegrees / 60;
+  const normalizedSaturation = Number(saturation) / 255;
+  const normalizedValue = Number(value) / 255;
+  const chroma = normalizedValue * normalizedSaturation;
+  const secondary = chroma * (1 - Math.abs((normalizedHue % 2) - 1));
+  const offset = normalizedValue - chroma;
+  const sector = Math.floor(normalizedHue);
+  const rgb = sector === 0 ? [chroma, secondary, 0]
+    : sector === 1 ? [secondary, chroma, 0]
+      : sector === 2 ? [0, chroma, secondary]
+        : sector === 3 ? [0, secondary, chroma]
+          : sector === 4 ? [secondary, 0, chroma]
+            : [chroma, 0, secondary];
+  return rgb.map((channel) => Math.round((channel + offset) * 255));
+}
+
+function updateColorRangePreview() {
+  const hueMin = Number(hsvRanges.h.min.value);
+  const hueMax = Number(hsvRanges.h.max.value);
+  const saturationMin = Number(hsvRanges.s.min.value);
+  const saturationMax = Number(hsvRanges.s.max.value);
+  const valueMin = Number(hsvRanges.v.min.value);
+  const valueMax = Number(hsvRanges.v.max.value);
+  const minimum = hsvToRgb(hueMin, saturationMin, valueMin);
+  const maximum = hsvToRgb(hueMax, saturationMax, valueMax);
+  const context = colorSwatch.getContext("2d");
+  const halfWidth = colorSwatch.width / 2;
+  context.clearRect(0, 0, colorSwatch.width, colorSwatch.height);
+  context.fillStyle = `rgb(${minimum.join(",")})`;
+  context.fillRect(0, 0, halfWidth, colorSwatch.height);
+  context.fillStyle = `rgb(${maximum.join(",")})`;
+  context.fillRect(halfWidth, 0, colorSwatch.width - halfWidth, colorSwatch.height);
+  context.fillStyle = "rgba(8, 15, 22, 0.78)";
+  context.fillRect(halfWidth - 0.5, 0, 1, colorSwatch.height);
+  const hueWrap = hueMin > hueMax ? " ↻" : "";
+  colorSampleValues.textContent = `H ${hueMin}–${hueMax}${hueWrap} · S ${saturationMin}–${saturationMax} · V ${valueMin}–${valueMax}`;
+  colorSwatch.title = `Erkennungsbereich · Minimum HSV ${hueMin}, ${saturationMin}, ${valueMin}; Maximum HSV ${hueMax}, ${saturationMax}, ${valueMax}`;
+}
+
+function updateRangeMarkers() {
+  const hueMin = Number(hsvRanges.h.min.value);
+  const hueMax = Number(hsvRanges.h.max.value);
+  const hueMidpoint = (hueMin + ((hueMax - hueMin + 180) % 180) / 2) % 180;
+  const saturationMidpoint = (Number(hsvRanges.s.min.value) + Number(hsvRanges.s.max.value)) / 2;
+  const valueMidpoint = (Number(hsvRanges.v.min.value) + Number(hsvRanges.v.max.value)) / 2;
+  const markerValues = {
+    h: { min: [hueMin, saturationMidpoint, valueMidpoint], max: [hueMax, saturationMidpoint, valueMidpoint] },
+    s: { min: [hueMidpoint, Number(hsvRanges.s.min.value), valueMidpoint], max: [hueMidpoint, Number(hsvRanges.s.max.value), valueMidpoint] },
+    v: { min: [hueMidpoint, saturationMidpoint, Number(hsvRanges.v.min.value)], max: [hueMidpoint, saturationMidpoint, Number(hsvRanges.v.max.value)] }
+  };
+
+  for (const [key, range] of Object.entries(hsvRanges)) {
+    const band = range.min.closest(".dual-range");
+    const width = band.clientWidth || 328;
+    for (const endpoint of ["min", "max"]) {
+      const value = Number(range[endpoint].value);
+      const fraction = value / range.limit;
+      const marker = band.querySelector(`[data-range-endpoint="${endpoint}"]`);
+      const x = 8 + fraction * Math.max(0, width - 16);
+      marker.setAttribute("cx", (x / width * 100).toFixed(2));
+      marker.setAttribute("cy", "12");
+      marker.setAttribute("rx", (7.5 * 100 / width).toFixed(3));
+      marker.setAttribute("ry", "7.5");
+      marker.setAttribute("fill", `rgb(${hsvToRgb(...markerValues[key][endpoint]).join(",")})`);
+    }
+  }
 }
 
 function readSettings() {
@@ -145,6 +242,8 @@ function loadSettings(config) {
   lineSpeedNumber.value = lineSpeed.value;
   lineGain.value = String(config.steering_gain ?? 1.0);
   lineMinArea.value = String(config.min_area_percent ?? 0.15);
+  if (configSaveTimer !== null) window.clearTimeout(configSaveTimer);
+  configSaveTimer = null;
   updateBetweenStrategyVisibility();
   showSliderValues();
   dirty = false;
@@ -153,21 +252,49 @@ function loadSettings(config) {
 }
 
 function setDirty() {
+  if (!initialized || active) return;
   dirty = true;
+  configSaveError = null;
+  editRevision += 1;
   showSliderValues();
+  lineStateMessage.textContent = "Änderung wird automatisch übernommen …";
   updateButtons();
+  if (configSaveTimer !== null) window.clearTimeout(configSaveTimer);
+  configSaveTimer = window.setTimeout(() => {
+    configSaveTimer = null;
+    void applySettings();
+  }, 280);
 }
 
 function updateButtons(detection = null, available = false) {
-  lineApply.disabled = active || saving || !dirty;
   lineStart.hidden = active;
   lineStop.hidden = !active;
   lineStart.disabled = active || dirty || saving || !available || !detection?.line_detected;
-  for (const input of adjustableInputs) input.disabled = active || saving;
+  for (const input of adjustableInputs) input.disabled = active;
+  lineConfigUpload.disabled = active || saving;
+  lineConfigApply.disabled = active || saving || !lineConfigJson.value.trim();
+}
+
+function setCameraAspect(width, height) {
+  if (!(width > 0 && height > 0)) return;
+  const ratio = width / height;
+  cameraViewport.dataset.aspect = Math.abs(ratio - 4 / 3) < 0.04 ? "4-3"
+    : Math.abs(ratio - 16 / 9) < 0.04 ? "16-9" : "other";
+  updateRoiThumbPosition();
+}
+
+function updateMaskOverlay() {
+  const opacity = Math.max(0, Math.min(100, Math.round(Number(maskOverlayOpacity.value) / 5) * 5));
+  maskOverlayOpacity.value = String(opacity);
+  maskOverlayOpacityValue.textContent = `${opacity} %`;
+  for (let value = 0; value <= 100; value += 5) lineMask.classList.remove(`mask-opacity-${value}`);
+  lineMask.classList.add(`mask-opacity-${opacity}`);
+  lineMask.classList.toggle("is-visible", maskOverlayEnabled.checked);
 }
 
 function updateBetweenStrategyVisibility() {
   betweenStrategyField.hidden = lineMode.value !== "between";
+  lineStart.textContent = lineMode.value === "area" ? "Flächenerkennung starten" : "Linienfolge starten";
 }
 
 async function requestJson(path, options = {}) {
@@ -188,52 +315,100 @@ function renderAutonomy(autonomy) {
   const detection = autonomy.detection || {};
   const frameWidth = Number(detection.width);
   const frameHeight = Number(detection.height);
-  if (frameWidth > 0 && frameHeight > 0) {
-    cameraViewport.style.setProperty("--camera-aspect", `${frameWidth} / ${frameHeight}`);
-  }
+  setCameraAspect(frameWidth, frameHeight);
   const stateText = {
     vision_unavailable: ["warning", "OpenCV fehlt", "OpenCV ist auf diesem Rover nicht installiert."],
     waiting_camera: ["waiting", "Warte auf Kamera", "Warte auf ein aktuelles Kamerabild."],
     updating: ["waiting", "Werte werden geprüft", "Die neuen Einstellungen werden auf das Livebild angewendet."],
-    no_line: ["warning", "Keine Linie", "Farbprofil oder Bildbereich anpassen; erkannte Fläche in der Maske prüfen."],
-    ready: ["ready", "Farbfläche erkannt", "Prüfe in der Erkennungsmaske, ob die erkannte Farbfläche wirklich deine Kurslinie ist."],
-    following: ["ready", "Folgt der Linie", "Automatik aktiv. Bei Linienverlust stoppt der Rover."],
+    no_line: ["warning", "Keine Erkennung", "Farbbereich oder Suchbereich anpassen; die Erkennung erscheint türkis im Livebild."],
+    ready: ["ready", "Erkennung bereit", "Prüfe, ob die Überlagerung nur die gewünschte Markierung enthält."],
+    following: ["ready", "Automatik aktiv", "Bei Erkennungsverlust stoppt der Rover."],
     paused: ["waiting", "Pausiert", "Geschwindigkeit steht auf 0 %."],
-    line_lost: ["warning", "Linie verloren", "Motoren gestoppt. Linie neu ausrichten und erneut starten."],
+    line_lost: ["warning", "Erkennung verloren", "Motoren gestoppt. Markierung neu ausrichten und erneut starten."],
     camera_lost: ["warning", "Kamera verloren", "Motoren gestoppt, weil kein aktuelles Kamerabild ankommt."],
     error: ["warning", "Erkennungsfehler", autonomy.error || "Die Linienauswertung wurde angehalten."]
   };
-  const [tone, label, message] = stateText[autonomy.state] || stateText.waiting_camera;
-  setStatus(lineStatePill, tone, label);
+  const [tone, _label, message] = stateText[autonomy.state] || stateText.waiting_camera;
+  const modeLabels = { area: "Fläche", single: "Linie", between: "Doppellinie" };
+  const modeLabel = modeLabels[autonomy.config?.line_mode || lineMode.value] || "Linie";
+  const frameAgeMs = Number(detection.frame_age_ms);
+  const hasFreshFrame = detection.frame_age_ms !== null
+    && Number.isFinite(frameAgeMs) && frameAgeMs <= 600;
+  const hasPosition = detection.line_detected && hasFreshFrame
+    && Number.isFinite(Number(detection.target_x_percent));
+  const positionLabel = hasPosition ? `${Math.round(Number(detection.target_x_percent))} %` : "—";
+  const angle = Number(detection.line_angle_degrees);
+  const hasAngle = hasPosition && detection.line_angle_degrees !== null && Number.isFinite(angle);
+  const angleLabel = hasAngle
+    ? ` · ${angle > 0 ? "+" : ""}${angle.toLocaleString("de-DE", { maximumFractionDigits: 1 })}°`
+    : "";
+  setStatus(lineStatePill, tone, `${modeLabel} · ${positionLabel}${angleLabel}`);
+  lineStatePill.title = message;
   lineStateMessage.textContent = dirty
-    ? "Änderungen noch nicht angewendet. Einstellungen übernehmen, um die Maske zu aktualisieren."
+    ? configSaveError || "Änderung wird automatisch übernommen …"
     : message;
-  if (detection.line_detected && Number.isFinite(Number(detection.target_x_percent))) {
+  if (hasPosition) {
     const position = Number(detection.target_x_percent);
-    linePosition.textContent = `${Math.round(position)} %`;
-    if (detection.line_count === 2 && autonomy.config?.between_strategy === "stay_between") {
-      const left = Math.round(Number(detection.boundary_left_x_percent));
-      const right = Math.round(Number(detection.boundary_right_x_percent));
-      lineArea.textContent = `Korridor ${left}–${right} %`;
-    } else {
-      lineArea.textContent = `${detection.line_count === 2 ? "2 Linien" : "Linie"} · ${Number(detection.area_percent || 0).toLocaleString("de-DE")} %`;
-    }
     cameraTargetOverlay.setAttribute("cx", String(position));
     cameraTargetOverlay.setAttribute("cy", String(detection.target_y_percent ?? 82));
     cameraTargetOverlay.removeAttribute("hidden");
   } else {
-    linePosition.textContent = "—";
-    lineArea.textContent = "Keine Linie";
     cameraTargetOverlay.setAttribute("hidden", "");
   }
-  const fps = Number(detection.fps);
-  lineFps.textContent = Number.isFinite(fps) && fps > 0 ? `${fps.toLocaleString("de-DE")} FPS` : "— FPS";
-  if (autonomy.available) {
-    lineMaskViewport.classList.add("has-frames");
-    lineMaskPlaceholder.textContent = "Warte auf OpenCV-Auswertung …";
+
+  const axisKeys = [
+    "line_axis_far_x_percent", "line_axis_far_y_percent",
+    "line_axis_near_x_percent", "line_axis_near_y_percent"
+  ];
+  const hasLineAxis = hasPosition && axisKeys.every(key =>
+    detection[key] !== null && Number.isFinite(Number(detection[key]))
+  );
+  if (hasLineAxis) {
+    const farX = Number(detection.line_axis_far_x_percent);
+    const farY = Number(detection.line_axis_far_y_percent);
+    const nearX = Number(detection.line_axis_near_x_percent);
+    const nearY = Number(detection.line_axis_near_y_percent);
+    for (const axis of [lineAxisOutline, lineAxisOverlay]) {
+      axis.setAttribute("x1", String(farX));
+      axis.setAttribute("y1", String(farY));
+      axis.setAttribute("x2", String(nearX));
+      axis.setAttribute("y2", String(nearY));
+      axis.removeAttribute("hidden");
+    }
+    lineAxisFarMarker.setAttribute("cx", String(farX));
+    lineAxisFarMarker.setAttribute("cy", String(farY));
+    lineAxisFarMarker.removeAttribute("hidden");
   } else {
-    lineMaskViewport.classList.remove("has-frames");
-    lineMaskPlaceholder.textContent = "OpenCV fehlt. Installiere das Paket python3-opencv.";
+    lineAxisOutline.setAttribute("hidden", "");
+    lineAxisOverlay.setAttribute("hidden", "");
+    lineAxisFarMarker.setAttribute("hidden", "");
+  }
+
+  const speed = Math.max(0, Math.min(100, Number(autonomy.config?.speed_percent ?? 0))) / 100;
+  const gain = Math.max(0, Number(autonomy.config?.steering_gain ?? 1));
+  const steeringError = Number(detection.steering_error);
+  const hasSteering = detection.line_detected && hasFreshFrame
+    && detection.steering_error !== null && Number.isFinite(steeringError);
+  if (hasSteering && speed > 0) {
+    const requestedCorrection = steeringError * gain * speed;
+    const leftSpeed = Math.max(0, Math.min(1, speed - requestedCorrection));
+    const rightSpeed = Math.max(0, Math.min(1, speed + requestedCorrection));
+    const maxDifferential = Math.min(2 * speed, 1);
+    const turnStrength = Math.max(-1, Math.min(1, (rightSpeed - leftSpeed) / maxDifferential));
+    const direction = turnStrength > 0.035 ? "Links" : turnStrength < -0.035 ? "Rechts" : "Geradeaus";
+    const strength = Math.round(Math.abs(turnStrength) * 100);
+    lineSteeringReadout.textContent = direction === "Geradeaus"
+      ? "Lenkbefehl: Geradeaus"
+      : `Lenkbefehl: ${direction} · ${strength} %`;
+    lineGuidanceArrow.setAttribute("x2", String(50 - turnStrength * 26));
+    lineGuidanceArrow.removeAttribute("hidden");
+  } else {
+    lineSteeringReadout.textContent = hasSteering && speed <= 0
+      ? "Lenkbefehl: pausiert · Geschwindigkeit 0 %"
+      : detection.line_detected && !hasFreshFrame
+        ? "Lenkbefehl: kein aktuelles Kamerabild"
+        : "Lenkbefehl: —";
+    lineGuidanceArrow.setAttribute("hidden", "");
   }
   updateButtons(detection, Boolean(autonomy.available) && autonomy.state !== "updating");
 }
@@ -241,21 +416,16 @@ function renderAutonomy(autonomy) {
 function updateCamera(camera) {
   const width = Number(camera.width);
   const height = Number(camera.height);
-  if (width > 0 && height > 0) {
-    cameraViewport.style.setProperty("--camera-aspect", `${width} / ${height}`);
-  }
+  setCameraAspect(width, height);
   if (camera.preset && cameraResolution.value !== camera.preset) cameraResolution.value = camera.preset;
   if (camera.preset) lastCameraPreset = camera.preset;
   if (camera.state === "online") {
     setStatus(cameraStatus, "ready", "Kamera bereit");
-    cameraLiveLabel.classList.remove("is-offline");
-    cameraLiveLabel.querySelector("span:last-child").textContent = "LIVE";
+    if (cameraFeed.naturalWidth > 0) cameraFeed.classList.add("loaded");
     cameraPlaceholder.hidden = true;
   } else {
     const message = camera.state === "disabled" ? "Kamera deaktiviert" : camera.state === "offline" ? "Kamera offline" : "Verbinde …";
     setStatus(cameraStatus, camera.state === "disabled" || camera.state === "offline" ? "warning" : "waiting", message);
-    cameraLiveLabel.classList.add("is-offline");
-    cameraLiveLabel.querySelector("span:last-child").textContent = camera.state === "offline" ? "OFFLINE" : "WARTET";
     cameraPlaceholder.hidden = false;
   }
 }
@@ -271,11 +441,17 @@ async function refreshStatus() {
     if (!initialized && autonomy.config) loadSettings(autonomy.config);
     renderAutonomy(autonomy);
   } catch (error) {
-    setStatus(lineStatePill, "warning", "Rover nicht erreichbar");
+    const modeLabels = { area: "Fläche", single: "Linie", between: "Doppellinie" };
+    setStatus(lineStatePill, "warning", `${modeLabels[lineMode.value] || "Linie"} · —`);
+    lineStatePill.title = "Rover nicht erreichbar.";
     lineStateMessage.textContent = "Die Verbindung zum Rover ist unterbrochen.";
     setStatus(cameraStatus, "warning", "Verbindung verloren");
-    cameraLiveLabel.classList.add("is-offline");
-    cameraLiveLabel.querySelector("span:last-child").textContent = "OFFLINE";
+    cameraTargetOverlay.setAttribute("hidden", "");
+    lineAxisOutline.setAttribute("hidden", "");
+    lineAxisOverlay.setAttribute("hidden", "");
+    lineAxisFarMarker.setAttribute("hidden", "");
+    lineGuidanceArrow.setAttribute("hidden", "");
+    lineSteeringReadout.textContent = "Lenkbefehl: Verbindung getrennt";
     updateButtons(null, false);
     console.error(error.message);
   } finally {
@@ -286,28 +462,211 @@ async function refreshStatus() {
 async function applySettings() {
   if (active || saving || !dirty) return;
   saving = true;
+  const savedRevision = editRevision;
   updateButtons();
-  lineStateMessage.textContent = "Einstellungen werden angewendet …";
+  lineStateMessage.textContent = "Einstellungen werden automatisch übernommen …";
   try {
     const result = await requestJson("/api/v1/autonomy/line/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(readSettings())
     });
-    dirty = false;
-    if (result.autonomy?.config) loadSettings(result.autonomy.config);
+    configSaveError = null;
+    dirty = savedRevision !== editRevision;
     renderAutonomy(result.autonomy);
-    await refreshStatus();
   } catch (error) {
-    lineStateMessage.textContent = error.message;
+    configSaveError = `Automatische Übernahme fehlgeschlagen: ${error.message}`;
+    lineStateMessage.textContent = configSaveError;
   } finally {
     saving = false;
     updateButtons();
+    if (dirty && !active && savedRevision !== editRevision) {
+      if (configSaveTimer !== null) window.clearTimeout(configSaveTimer);
+      configSaveTimer = window.setTimeout(() => {
+        configSaveTimer = null;
+        void applySettings();
+      }, 80);
+    }
   }
 }
 
+function makeConfigDocument(settings = readSettings()) {
+  return {
+    format: "wave-rover-line-detection",
+    version: 1,
+    settings
+  };
+}
+
+function setConfigMessage(message, isError = false) {
+  lineConfigMessage.textContent = message;
+  lineConfigMessage.classList.toggle("is-error", isError);
+}
+
+function parseImportedConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Die JSON-Wurzel muss ein Objekt sein.");
+  }
+
+  let source = value;
+  if (Object.prototype.hasOwnProperty.call(value, "format")) {
+    if (value.format !== "wave-rover-line-detection") throw new Error("Unbekanntes Konfigurationsformat.");
+    if (value.version !== 1) throw new Error("Diese Version der Konfiguration wird nicht unterstützt.");
+    source = value.settings;
+  } else if (value.autonomy?.config) {
+    source = value.autonomy.config;
+  } else if (value.config) {
+    source = value.config;
+  } else if (value.settings) {
+    source = value.settings;
+  }
+
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new Error("Die JSON-Datei enthält kein Einstellungsobjekt.");
+  }
+
+  const stringChoices = {
+    color_preset: ["white", "black", "yellow", "red", "green", "blue", "custom"],
+    line_mode: ["area", "single", "between"],
+    between_strategy: ["midpoint", "stay_between"]
+  };
+  const numberLimits = {
+    h_min: [0, 179, true], h_max: [0, 179, true],
+    s_min: [0, 255, true], s_max: [0, 255, true],
+    v_min: [0, 255, true], v_max: [0, 255, true],
+    roi_top_percent: [0, 100, true], speed_percent: [0, 100, true],
+    steering_gain: [0.2, 2.5, false], min_area_percent: [0.05, 5, false]
+  };
+  const normalized = {};
+  for (const [key, choices] of Object.entries(stringChoices)) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    if (!choices.includes(source[key])) throw new Error(`Ungültiger Wert für ${key}.`);
+    normalized[key] = source[key];
+  }
+  for (const [key, [minimum, maximum, integer]] of Object.entries(numberLimits)) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const valueAtKey = source[key];
+    if (typeof valueAtKey !== "number" || !Number.isFinite(valueAtKey)
+        || valueAtKey < minimum || valueAtKey > maximum
+        || (integer && !Number.isInteger(valueAtKey))) {
+      throw new Error(`Ungültiger Wert für ${key} (${minimum}–${maximum}).`);
+    }
+    normalized[key] = valueAtKey;
+  }
+  if (Object.keys(normalized).length === 0) {
+    throw new Error("Keine unterstützten Erkennungseinstellungen gefunden.");
+  }
+  return normalized;
+}
+
+function refreshConfigActionState() {
+  lineConfigApply.disabled = active || saving || !lineConfigJson.value.trim();
+  lineConfigUpload.disabled = active || saving;
+}
+
+async function copyCurrentConfig() {
+  const text = JSON.stringify(makeConfigDocument(), null, 2);
+  lineConfigJson.value = text;
+  refreshConfigActionState();
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      lineConfigJson.focus();
+      lineConfigJson.select();
+      if (!document.execCommand("copy")) throw new Error("Zwischenablage ist nicht verfügbar.");
+    }
+    setConfigMessage("Konfiguration in die Zwischenablage kopiert.");
+  } catch (error) {
+    setConfigMessage(`Kopieren fehlgeschlagen: ${error.message}`, true);
+  }
+}
+
+function downloadCurrentConfig() {
+  const text = JSON.stringify(makeConfigDocument(), null, 2);
+  const blobUrl = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = "wave-rover-line-detection.json";
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+  setConfigMessage("JSON-Datei mit der aktuellen Konfiguration heruntergeladen.");
+}
+
+async function applyImportedConfig() {
+  if (active || saving) return;
+  let imported;
+  try {
+    imported = parseImportedConfig(JSON.parse(lineConfigJson.value));
+  } catch (error) {
+    setConfigMessage(`JSON konnte nicht übernommen werden: ${error.message}`, true);
+    return;
+  }
+
+  const hadPendingChanges = dirty;
+  const currentSettings = readSettings();
+  const presetValues = imported.color_preset && imported.color_preset !== currentSettings.color_preset
+    ? HSV_PRESETS[imported.color_preset] : null;
+  const nextSettings = { ...currentSettings, ...(presetValues || {}), ...imported };
+  if (nextSettings.s_min > nextSettings.s_max || nextSettings.v_min > nextSettings.v_max) {
+    setConfigMessage("Min.-Werte für Sättigung und Helligkeit dürfen nicht über Max. liegen.", true);
+    return;
+  }
+  if (configSaveTimer !== null) window.clearTimeout(configSaveTimer);
+  configSaveTimer = null;
+  saving = true;
+  updateButtons();
+  refreshConfigActionState();
+  setConfigMessage("Konfiguration wird auf den Rover übertragen …");
+  try {
+    const result = await requestJson("/api/v1/autonomy/line/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nextSettings)
+    });
+    const acceptedSettings = result.autonomy?.config || nextSettings;
+    loadSettings(acceptedSettings);
+    renderAutonomy(result.autonomy);
+    setConfigMessage("Konfiguration übernommen und auf dem Rover gespeichert.");
+  } catch (error) {
+    dirty = hadPendingChanges;
+    configSaveError = `Konfiguration konnte nicht übertragen werden: ${error.message}`;
+    lineStateMessage.textContent = configSaveError;
+    setConfigMessage(configSaveError, true);
+    if (dirty) {
+      configSaveTimer = window.setTimeout(() => {
+        configSaveTimer = null;
+        void applySettings();
+      }, 280);
+    }
+  } finally {
+    saving = false;
+    updateButtons();
+    refreshConfigActionState();
+  }
+}
+
+lineConfigCopy.addEventListener("click", copyCurrentConfig);
+lineConfigDownload.addEventListener("click", downloadCurrentConfig);
+lineConfigUpload.addEventListener("click", () => lineConfigFile.click());
+lineConfigApply.addEventListener("click", applyImportedConfig);
+lineConfigJson.addEventListener("input", refreshConfigActionState);
+lineConfigFile.addEventListener("change", async () => {
+  const file = lineConfigFile.files?.[0];
+  if (!file) return;
+  try {
+    lineConfigJson.value = await file.text();
+    refreshConfigActionState();
+    setConfigMessage(`${file.name} geladen. Prüfe die Werte und wähle „Konfiguration übernehmen“.`);
+  } catch (error) {
+    setConfigMessage(`Datei konnte nicht gelesen werden: ${error.message}`, true);
+  } finally {
+    lineConfigFile.value = "";
+  }
+});
+
 async function startFollowing() {
-  if (dirty || active) return;
+  if (dirty || saving || active) return;
   setColorPickerActive(false);
   lineStart.disabled = true;
   try {
@@ -351,7 +710,7 @@ function setColorPickerActive(isActive) {
   colorPickerHint.classList.remove("is-error");
   colorPickerHint.textContent = isActive
     ? "Tippe auf die gewünschte Farbe im Livebild."
-    : "Farbpunkt auswählen; die Bereiche werden um den Messwert gesetzt.";
+    : "";
 }
 
 function median(values) {
@@ -381,7 +740,7 @@ function rgbToOpenCvHsv(red, green, blue) {
   };
 }
 
-function setPickedColor(rgb, hsv) {
+function setPickedColor(hsv) {
   const hueTolerance = 10;
   const saturationTolerance = 50;
   const valueTolerance = 45;
@@ -394,13 +753,9 @@ function setPickedColor(rgb, hsv) {
   hsvRanges.v.min.value = String(Math.max(0, hsv.v - valueTolerance));
   hsvRanges.v.max.value = String(Math.min(255, hsv.v + valueTolerance));
   lineColor.value = "custom";
-  const swatchContext = colorSwatch.getContext("2d");
-  swatchContext.fillStyle = `rgb(${rgb.join(",")})`;
-  swatchContext.fillRect(0, 0, colorSwatch.width, colorSwatch.height);
-  colorSampleValues.textContent = `HSV ${hsv.h}, ${hsv.s}, ${hsv.v}`;
   showSliderValues();
   setDirty();
-  colorPickerHint.textContent = "Messwert gewählt. Bereiche kontrollieren und Einstellungen anwenden.";
+  colorPickerHint.textContent = "Farbmessung übernommen; Einstellungen werden gespeichert.";
 }
 
 function pickColorFromLiveImage(event) {
@@ -443,7 +798,7 @@ function pickColorFromLiveImage(event) {
     }
     const rgb = channels.map(median).map(Math.round);
     setColorPickerActive(false);
-    setPickedColor(rgb, rgbToOpenCvHsv(...rgb));
+    setPickedColor(rgbToOpenCvHsv(...rgb));
   } catch (error) {
     colorPickerHint.classList.add("is-error");
     colorPickerHint.textContent = "Farbwert konnte nicht aus dem aktuellen Bild gelesen werden.";
@@ -494,6 +849,8 @@ for (const [key, range] of Object.entries(hsvRanges)) {
 }
 colorPickButton.addEventListener("click", () => setColorPickerActive(!colorPicking));
 cameraFeed.addEventListener("click", pickColorFromLiveImage);
+maskOverlayEnabled.addEventListener("change", updateMaskOverlay);
+maskOverlayOpacity.addEventListener("input", updateMaskOverlay);
 window.addEventListener("pointerup", () => {
   for (const band of document.querySelectorAll(".dual-range")) {
     band.classList.remove("is-moving-min", "is-moving-max");
@@ -515,9 +872,21 @@ lineSpeedNumber.addEventListener("change", () => {
   lineSpeedNumber.value = String(value);
   setDirty();
 });
-lineApply.addEventListener("click", applySettings);
 lineStart.addEventListener("click", startFollowing);
 lineStop.addEventListener("click", stopFollowing);
+document.querySelector(".advanced-settings").addEventListener("toggle", updateRangeMarkers);
+window.addEventListener("resize", () => {
+  updateRangeMarkers();
+  updateRoiThumbPosition();
+});
+if (typeof ResizeObserver !== "undefined") {
+  const markerResizeObserver = new ResizeObserver(() => {
+    updateRangeMarkers();
+    updateRoiThumbPosition();
+  });
+  markerResizeObserver.observe(cameraViewport);
+  for (const band of document.querySelectorAll(".dual-range")) markerResizeObserver.observe(band);
+}
 
 cameraFeed.addEventListener("load", () => {
   cameraFeed.classList.add("loaded");
@@ -527,14 +896,6 @@ cameraFeed.addEventListener("error", () => {
   cameraFeed.classList.remove("loaded");
   cameraPlaceholder.hidden = false;
 });
-lineMask.addEventListener("load", () => lineMaskViewport.classList.add("has-frames"));
-lineMask.addEventListener("error", () => {
-  lineMaskViewport.classList.remove("has-frames");
-  if (lineMaskPlaceholder.textContent === "Warte auf OpenCV-Auswertung …") {
-    lineMaskPlaceholder.textContent = "Erkennungsbild wird geladen …";
-  }
-});
-
 cameraResolution.addEventListener("change", async () => {
   cameraResolution.disabled = true;
   try {
@@ -622,5 +983,6 @@ window.addEventListener("pagehide", () => {
 });
 
 showSliderValues();
+updateMaskOverlay();
 refreshStatus();
 window.setInterval(refreshStatus, 650);

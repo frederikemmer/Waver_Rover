@@ -1,16 +1,18 @@
 # WAVE ROVER HTTP API
 
-The Python service on the Raspberry Pi exposes a versioned HTTP API on port
-8080. The browser interface uses the same API. The machine-readable OpenAPI
-description is available from the Rover at:
+The installed Caddy endpoint on the Raspberry Pi exposes the versioned API over
+HTTPS on port 443. The browser interface uses the same API. The machine-readable
+OpenAPI description is available from the Rover at:
 
 ~~~text
-http://wave-rover.local:8080/api/v1/openapi.json
+https://wave-rover.local/api/v1/openapi.json
 ~~~
 
-Use the Rover's current IP address if `wave-rover.local` does not resolve. The
-API currently has no login or user arbitration. Keep it on the Rover's trusted
-Wi-Fi or lab network; do not expose port 8080 to the public internet.
+Use the Rover's current local DNS name `wave-rover.local`. Install
+`/opt/wave-rover-control/wave-rover-root-ca.crt` as a trusted root certificate
+on each client device. The API currently has no login or user arbitration.
+Keep it on the Rover's trusted Wi-Fi or lab network; do not expose it to the
+public internet. Development runs on port 8080 by default.
 
 The browser page has an expandable, searchable endpoint guide. It summarizes
 each route and links to the machine-readable specification below.
@@ -35,7 +37,7 @@ with the arrow keys. On narrow screens the two panels stack vertically.
 | `POST` | `/api/v1/autonomy/line/config` | Apply HSV, ROI, mode, speed, and steering settings |
 | `POST` | `/api/v1/autonomy/line/start` | Start following after line/camera/UART readiness checks |
 | `POST` | `/api/v1/autonomy/line/stop` | Stop and disarm line following |
-| `GET` | `/api/v1/autonomy/line/preview.mjpg` | Live binary threshold mask for calibration |
+| `GET` | `/api/v1/autonomy/line/preview.mjpg` | Live color-detection overlay for the camera image |
 | `GET` | `/api/v1/openapi.json` | OpenAPI 3.1 machine-readable contract |
 
 All JSON request bodies require `Content-Type: application/json`. JSON status
@@ -72,8 +74,8 @@ keep moving must renew its command at least every 150 ms and should send
 ~~~bash
 curl -fsS -H 'Content-Type: application/json' \
   -d '{"left":0.25,"right":0.25}' \
-  http://wave-rover.local:8080/api/v1/drive
-curl -fsS -X POST http://wave-rover.local:8080/api/v1/drive/stop
+  https://wave-rover.local/api/v1/drive
+curl -fsS -X POST https://wave-rover.local/api/v1/drive/stop
 ~~~
 
 The following standard-library Python example keeps renewing a slow forward
@@ -85,7 +87,7 @@ import json
 import time
 from urllib.request import Request, urlopen
 
-BASE_URL = "http://wave-rover.local:8080"
+BASE_URL = "https://wave-rover.local"
 
 def request(path, payload=None, method="GET"):
     body = json.dumps(payload).encode() if payload is not None else None
@@ -170,7 +172,7 @@ cell-specific characterization; the Waveshare firmware would need to expose
 those readings to the Pi.
 
 ~~~bash
-curl -fsS http://wave-rover.local:8080/api/v1/battery
+curl -fsS https://wave-rover.local/api/v1/battery
 ~~~
 
 ## Camera
@@ -188,18 +190,26 @@ frame age. The MJPEG stream is at `/api/v1/camera.mjpg`.
 
 ## Autonomous line following
 
-The Autonom browser page is served at `/autonomy`. It displays the camera and
-the current OpenCV HSV mask side by side. The mask is also available as MJPEG
-at `/api/v1/autonomy/line/preview.mjpg`; white pixels passed the selected
-threshold, and the green marker shows the target position.
+The Autonom browser page is served at `/autonomy`. It overlays the current
+OpenCV HSV detection on the live camera image. The overlay is also available as
+MJPEG at `/api/v1/autonomy/line/preview.mjpg`; cyan pixels passed the selected
+threshold, black pixels are outside the mask, and the image center and ROI edge
+are marked. The browser adds a yellow near-target point, a green averaged line
+axis in single-line mode with a white far-end marker, and an orange arrow for the
+requested turn direction. A legend below the image identifies the detected color,
+near target, line axis, camera
+centerline, and steering command. The browser screen-blends the black
+background; cyan mask pixels and the center/ROI guides remain visible, while
+target and steering guidance are drawn separately for clear visibility.
 
 `GET /api/v1/autonomy/line` reports whether OpenCV is available, whether the
 follower is active, its state, the applied settings, and current detection
 measurements. The combined `/api/v1/status` response includes the same object
 as `autonomy` and reports `mode` as `manual` or `autonomous`.
-The `detection` object includes `line_detected`, the number of selected line
+The `detection` object includes `line_detected`, the number of selected color
 components, target x/y percentages in the camera image, the left/right boundary
-positions for a line pair, signed steering and heading errors, selected area,
+positions for a line pair, the fitted line-axis endpoint percentages, signed
+steering and heading errors, selected area, the fitted line angle in degrees,
 analyzed frame size, ROI position, processing FPS, and frame age. When speed is
 configured as `0`, an armed follower reports
 `paused` and keeps both wheels stopped; stop it before changing its settings.
@@ -207,13 +217,19 @@ configured as `0`, an armed follower reports
 `POST /api/v1/autonomy/line/config` accepts a partial settings object and
 merges it with the current values. Configuration is rejected with `409` while
 the follower is active. Color presets are `white`, `black`, `yellow`, `red`,
-`green`, `blue`, and `custom`. `line_mode` is `single` or `between`.
+`green`, `blue`, and `custom`. `line_mode` is `area`, `single`, or `between`
+(the UI labels these Fläche, Linie, and Doppellinie); it defaults to `single`.
+`area` follows the largest qualifying color component without a line-shape
+filter. `single` follows the largest elongated component, using a minimum
+long-to-short contour ratio of 2.2. `between` requires two separated elongated
+components and treats them as course boundaries.
 `between_strategy` is `midpoint` (the default) or `stay_between`; the latter
 holds a straight course while the image center stays inside the detected
 corridor, then steers back toward its nearest boundary. Hue uses OpenCV's 0–179
 range; saturation and value use 0–255. Set `h_min` greater than `h_max` to
 match hues that wrap through hue zero. The lower-frame analysis starts at
-`roi_top_percent` (25–85). `speed_percent` is 0–100, the steering gain is
+`roi_top_percent` (0–100); at 100%, only the bottom image row is analyzed.
+`speed_percent` is 0–100, the steering gain is
 0.2–2.5, and the minimum contour area is 0.05–5% of the analyzed region.
 
 Example: apply the white single-line profile with a 15% requested motor speed
@@ -233,14 +249,53 @@ online, and the drive UART is connected. A `409` response means the ready
 conditions are not met; `503` means OpenCV is unavailable. Start from a low
 speed and calibrate on a clear course.
 
-For `single`, the detector follows the largest qualifying color component and
-combines its near-image lateral position with a smaller near-to-far heading
-estimate. For `between`, it requires two separated components. `midpoint`
+The autonomy page can export the complete current settings as JSON, copy that
+JSON to the clipboard, and import by pasting or loading a `.json` file. Its
+portable wrapper has this shape:
+
+~~~json
+{
+  "format": "wave-rover-line-detection",
+  "version": 1,
+  "settings": {
+    "color_preset": "white",
+    "line_mode": "single",
+    "between_strategy": "midpoint",
+    "h_min": 0,
+    "h_max": 179,
+    "s_min": 0,
+    "s_max": 85,
+    "v_min": 150,
+    "v_max": 255,
+    "roi_top_percent": 58,
+    "speed_percent": 15,
+    "steering_gain": 1.0,
+    "min_area_percent": 0.15
+  }
+}
+~~~
+
+Import validates the wrapper and submits `settings` to the same configuration
+endpoint. A partial `settings` object is accepted and keeps the Rover's
+existing values for omitted fields. Import and upload are disabled while the
+follower is active; exporting remains available.
+
+For `single`, the detector follows the largest qualifying line-shaped
+component, fits an axis through the central 60% of its visible length, and
+combines the near end's lateral position with the fitted direction at equal
+weight. The green preview segment shows this fit; the reported signed angle is
+relative to the image's vertical axis. For `between`, it requires two separated
+line-shaped components. `midpoint`
 steers toward their average; `stay_between` leaves the target at the image
 center while it is inside the corridor, then targets just inside the nearest
-boundary. `line_detected` means that the configured HSV threshold found a
-qualifying color component; it does not prove that the component is a course
-marking. Inspect the camera mask and target marker before arming the Rover.
+boundary. `line_detected` means that the configured HSV threshold and geometry
+filter found a component for the chosen mode; it does not prove that the
+component is a course marking. Inspect the camera overlay and target marker
+before arming the Rover. In the browser, the heading pill shows the selected
+mode, target's horizontal image position, and fitted line angle when available.
+The orange arrow visualizes the requested wheel-speed correction: left means the
+Rover would turn left, right means it would turn right, and the percentage is a
+relative steering strength rather than a measured wheel or body angle.
 Steering scales the configured speed by the signed error and gain; the follower
 only requests forward wheel speeds. All commands still pass through
 the configured `WAVER_MAX_SPEED` ceiling. If the line or fresh camera frames
@@ -272,5 +327,5 @@ for the serial port and leaves student control code on the Pi.
 
 The service has no CORS policy for arbitrary web origins. Local Python clients
 can call the HTTP API directly. A browser client should be served from the
-Rover origin (`http://wave-rover.local:8080`) or explicitly be configured with
-a separately reviewed CORS policy.
+Rover origin (`https://wave-rover.local`) or explicitly be configured with a
+separately reviewed CORS policy.
