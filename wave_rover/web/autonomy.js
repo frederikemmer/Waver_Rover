@@ -322,10 +322,11 @@ function renderAutonomy(autonomy) {
     updating: ["waiting", "Werte werden geprüft", "Die neuen Einstellungen werden auf das Livebild angewendet."],
     no_line: ["warning", "Keine Erkennung", "Farbbereich oder Suchbereich anpassen; die Erkennung erscheint türkis im Livebild."],
     ready: ["ready", "Erkennung bereit", "Prüfe, ob die Überlagerung nur die gewünschte Markierung enthält."],
-    following: ["ready", "Automatik aktiv", "Bei Erkennungsverlust stoppt der Rover."],
+    following: ["ready", "Automatik aktiv", "Bei Erkennungsverlust fährt der Rover höchstens 300 ms mit dem letzten Lenkbefehl weiter."],
+    line_recovering: ["warning", "Erkennung kurz verloren", `${autonomy.error || "Markierung fehlt."} Letzter Lenkbefehl bleibt höchstens 300 ms aktiv.`],
     paused: ["waiting", "Pausiert", "Geschwindigkeit steht auf 0 %."],
-    line_lost: ["warning", "Erkennung verloren", "Motoren gestoppt. Markierung neu ausrichten und erneut starten."],
-    camera_lost: ["warning", "Kamera verloren", "Motoren gestoppt, weil kein aktuelles Kamerabild ankommt."],
+    line_lost: ["warning", "Erkennung verloren", `${autonomy.error || "Keine gültige Markierung erkannt."} Motoren gestoppt; erneut starten.`],
+    camera_lost: ["warning", "Kamera verloren", "Motoren gestoppt, weil kein aktuelles Kamerabild ankommt. Erneut starten."],
     error: ["warning", "Erkennungsfehler", autonomy.error || "Die Linienauswertung wurde angehalten."]
   };
   const [tone, _label, message] = stateText[autonomy.state] || stateText.waiting_camera;
@@ -342,7 +343,8 @@ function renderAutonomy(autonomy) {
   const angleLabel = hasAngle
     ? ` · ${angle > 0 ? "+" : ""}${angle.toLocaleString("de-DE", { maximumFractionDigits: 1 })}°`
     : "";
-  setStatus(lineStatePill, tone, `${modeLabel} · ${positionLabel}${angleLabel}`);
+  const stoppedByFault = !active && ["line_lost", "camera_lost", "error"].includes(autonomy.state);
+  setStatus(lineStatePill, tone, (stoppedByFault || autonomy.state === "line_recovering") ? _label : `${modeLabel} · ${positionLabel}${angleLabel}`);
   lineStatePill.title = message;
   lineStateMessage.textContent = dirty
     ? configSaveError || "Änderung wird automatisch übernommen …"

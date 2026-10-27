@@ -9,46 +9,9 @@ import threading
 import time
 from typing import Any
 
+from .oled import OLEDStatus, _estimate_charge_percent
+
 logger = logging.getLogger(__name__)
-
-# Approximate resting-voltage curve for a generic 4.2 V-per-cell Li-ion pack.
-# The Rover uses three 18650 cells in series; its exact cell model is unknown.
-_LI_ION_CELL_VOLTAGE_TO_PERCENT = (
-    (3.0, 0),
-    (3.3, 5),
-    (3.5, 10),
-    (3.6, 15),
-    (3.7, 25),
-    (3.8, 40),
-    (3.9, 60),
-    (4.0, 80),
-    (4.1, 90),
-    (4.2, 100),
-)
-
-
-def _estimate_charge_percent(voltage_v: float | None) -> int | None:
-    """Estimate 3S Li-ion charge from pack voltage; this is not fuel gauging."""
-    if voltage_v is None:
-        return None
-
-    cell_voltage = voltage_v / 3.0
-    points = _LI_ION_CELL_VOLTAGE_TO_PERCENT
-    if cell_voltage <= points[0][0]:
-        return 0
-    if cell_voltage >= points[-1][0]:
-        return 100
-
-    percent = 0.0
-    for (low_voltage, low_percent), (high_voltage, high_percent) in zip(points, points[1:]):
-        if cell_voltage <= high_voltage:
-            portion = (cell_voltage - low_voltage) / (high_voltage - low_voltage)
-            percent = low_percent + portion * (high_percent - low_percent)
-            break
-
-    # Five-point steps avoid suggesting more precision than the voltage curve
-    # and unknown cell/load conditions can support.
-    return max(0, min(100, int(math.floor(percent / 5.0 + 0.5)) * 5))
 
 
 class DriveController:
@@ -77,17 +40,23 @@ class DriveController:
         self._thread: threading.Thread | None = None
         self._battery_voltage_v: float | None = None
         self._battery_seen_at: float | None = None
+        self._oled = OLEDStatus()
 
     def start(self) -> None:
         if not self._enabled:
             return
+        self._oled.start()
         self._thread = threading.Thread(
             target=self._run, name="rover-drive-uart", daemon=True
         )
         self._thread.start()
 
-    def set_speeds(self, left: float, right: float) -> tuple[float, float]:
-        """Set a short-lived wheel command and return its bounded values."""
+    def set_speeds(
+        self, left: float, right: float, *, valid_until: float | None = None
+    ) -> tuple[float, float]:
+        """Set bounded speeds, optionally expiring before the usual watchdog."""
+        if valid_until is not None and not math.isfinite(valid_until):
+            raise ValueError("Command deadline must be finite.")
         bounded = (
             self._bounded(left),
             self._bounded(right),
@@ -99,6 +68,8 @@ class DriveController:
                 if bounded != (0.0, 0.0)
                 else 0.0
             )
+            if valid_until is not None:
+                self._lease_until = min(self._lease_until, valid_until)
         self._wake.set()
         return bounded
 
@@ -157,6 +128,7 @@ class DriveController:
         if self._thread is not None:
             self._thread.join(timeout=1.0)
         self._close_serial()
+        self._oled.close()
 
     def _bounded(self, value: float) -> float:
         number = float(value)
@@ -220,12 +192,16 @@ class DriveController:
         last_sent: tuple[float, float] | None = None
         last_tx = 0.0
         next_feedback_request = 0.0
+        next_oled_update = 0.0
+        oled_line = 0
 
         while not self._stopping.is_set():
             try:
                 if self._serial is None:
                     self._connect()
                     last_sent = None
+                    next_oled_update = 0.0
+                    oled_line = 0
 
                 command = self._current_command()
                 now = time.monotonic()
@@ -245,6 +221,19 @@ class DriveController:
                     next_feedback_request = now + 1.0
 
                 self._read_feedback()
+
+                # Keep metadata lookups off the motor/watchdog thread. Send at
+                # most one short OLED command per iteration, after drive I/O.
+                if now >= next_oled_update:
+                    battery = self.battery_status()
+                    voltage = battery["voltage_v"] if battery["state"] == "available" else None
+                    lines = self._oled.lines(voltage)
+                    payload = {"T": 3, "lineNum": oled_line, "Text": lines[oled_line]}
+                    self._serial.write((json.dumps(payload) + "\n").encode("utf-8"))
+                    oled_line = (oled_line + 1) % 4
+                    if oled_line == 0:
+                        self._oled.advance()
+                    next_oled_update = now + (1.0 if oled_line == 0 else 0.1)
 
                 with self._lock:
                     self._state = "connected"

@@ -26,7 +26,15 @@ curl -fsSL https://github.com/frederikemmer/Waver_Rover/raw/master/install.sh | 
 
 The installer adds the Raspberry Pi OS OpenCV package and Caddy, creates a
 Python virtual environment, and starts the Rover service behind Caddy. Open the
-HTTPS address from a phone or laptop on the same network:
+HTTPS address from a phone or laptop on the same network. For the OLED, the
+installer reuses verified student credentials or asks for the existing Linux
+login password without changing it. Run it from an interactive terminal.
+The OLED continuously shows IP, hostname, `u: USER - p: PASSWORD`, and battery
+percentage/volts. Long rows scroll; percentage is a rough voltage estimate.
+After changing a login password outside the installers, rerun the installer
+to update the displayed password.
+
+Open:
 
 ~~~text
 https://wave-rover.local/
@@ -61,8 +69,9 @@ serves its page and reports the hardware as disabled.
   image, and settings apply automatically; the default speed is 15%.
 - Battery voltage and a rough percentage estimate appear together in the shared
   header.
-- Line following is disarmed by default and stops on line loss, stale camera
-  frames, page exit, or manual control taking over.
+- Line following is disarmed by default. On line loss it holds the last steering
+  command for up to 300 ms, then stops and disarms unless detection recovers.
+  It also stops on stale camera frames, page exit, or manual control taking over.
 
 The rover is a mobile platform. Verify the color mask and steering direction
 with the wheels lifted, then use a clear marked course at low speed.

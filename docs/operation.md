@@ -309,3 +309,35 @@ browser.
 
 The same GPIO UART should not be opened by this service and another Waveshare
 or student program at the same time.
+
+
+## Diagnose von Stopps in der Automatik
+
+Die Mindestfläche (auch 0,05 %) gilt pro zusammenhängender Kontur nach dem
+3×3-Rauschfilter, bezogen auf den Suchbereich. Sie ist keine Mindestmenge aller
+farbigen Pixel zusammen. Konturen über 55 % des Suchbereichs werden verworfen.
+Im Modus Linie muss das Seitenverhältnis mindestens 2,2:1 betragen; Doppellinie
+benötigt zwei solche Konturen mit 16–90 % Bildbreite Abstand.
+
+Bei Erkennungsverlust fährt der Rover bis zu 300 ms mit dem letzten gültigen
+Lenkbefehl weiter (`line_recovering`). Die Frist beginnt mit dem ersten Bild
+ohne gültiges Ziel; weitere ungültige Bilder verlängern sie nicht. Kehrt die
+Erkennung vor Ablauf zurück, fährt die Automatik ohne Neustart weiter. Nach
+300 ms kontinuierlichem Verlust stoppen die Motoren und die Automatik schaltet
+sich aus. Erst ein ausdrücklicher Neustart gibt sie wieder frei. Auch ein erst
+nach Fristablauf ausgewertetes gutes Bild löst keine automatische Wiederanfahrt
+aus. Der Motor-Watchdog begrenzt den gehaltenen Befehl zusätzlich auf dieselbe
+Frist, falls die Bildauswertung hängt. Kamera- und Verarbeitungsfehler sowie
+manuelles Stoppen behalten ihre bisherigen Stoppregeln.
+
+Der Zustand `line_lost` und sein Grund in `error` bleiben bis zu einer expliziten
+Aktion erhalten. Die Oberfläche zeigt Stopp und Überbrückungsphase direkt; der
+Tooltip nennt den Grund. `detection.rejection_reason` erklärt zusätzlich die
+Ablehnung des aktuellen Bildes. Kameraverlust und Verarbeitungsfehler bleiben
+ebenfalls sichtbar.
+
+Für eine konkrete Diagnose nach einem Stopp den Status unter
+`GET /api/v1/autonomy/line` und die Dienstlogs prüfen. Bei weiterhin aktiver
+Automatik kommen auch Motor-Watchdog, UART-Verbindung oder zu geringe
+Motorleistung als Ursache infrage. Ohne aktuellen Gerätestatus ist damit noch
+nicht bewiesen, welche Bedingung einen beobachteten Stopp ausgelöst hat.

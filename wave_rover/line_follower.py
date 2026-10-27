@@ -58,6 +58,7 @@ class LineFollower:
 
     MAX_FRAME_WIDTH = 640
     FRAME_TIMEOUT_SECONDS = 0.6
+    LINE_LOSS_GRACE_SECONDS = 0.3
 
     def __init__(self, camera: CameraStream, drive: DriveController) -> None:
         self.camera = camera
@@ -68,6 +69,8 @@ class LineFollower:
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
         self._active = False
+        self._line_loss_started_at: float | None = None
+        self._last_steering_error: float | None = None
         self._state = "waiting_camera" if cv2 is not None else "vision_unavailable"
         self._error = VISION_IMPORT_ERROR
         self._config = dict(DEFAULT_CONFIG)
@@ -75,6 +78,7 @@ class LineFollower:
         self._processed_revision = -1
         self._detection: dict[str, Any] = {
             "line_detected": False,
+            "rejection_reason": None,
             "line_count": 0,
             "target_x_percent": None,
             "target_y_percent": None,
@@ -227,6 +231,8 @@ class LineFollower:
         self.drive.stop()
         with self._lock:
             self._active = True
+            self._line_loss_started_at = None
+            self._last_steering_error = detection.get("steering_error")
             self._state = "following"
             self._error = None
         logger.info("Line following started with %s profile", self._config["color_preset"])
@@ -236,6 +242,8 @@ class LineFollower:
         with self._lock:
             was_active = self._active
             self._active = False
+            self._line_loss_started_at = None
+            self._last_steering_error = None
             if self._state not in ("vision_unavailable", "error", "camera_lost"):
                 self._state = "ready" if self._detection["line_detected"] else "no_line"
         if was_active:
@@ -284,7 +292,12 @@ class LineFollower:
         sequence = 0
         last_fps_at = 0.0
         while not self._stopping.is_set():
-            item = self.camera.wait_for_frame(sequence, timeout=0.25)
+            with self._lock:
+                timeout = 0.25
+                if self._active and self._line_loss_started_at is not None:
+                    deadline = self._line_loss_started_at + self.LINE_LOSS_GRACE_SECONDS
+                    timeout = max(0.0, min(timeout, deadline - time.monotonic()))
+            item = self.camera.wait_for_frame(sequence, timeout=timeout)
             if item is None:
                 self._stop_if_camera_lost()
                 continue
@@ -299,29 +312,14 @@ class LineFollower:
                 if last_fps_at:
                     detection["fps"] = round(1.0 / max(0.001, now - last_fps_at), 1)
                 last_fps_at = now
-                with self._lock:
-                    self._last_frame_at = now
-                    self._processed_revision = revision
-                    self._detection = detection
-                    self._error = None
-                    if self._active and not detection["line_detected"]:
-                        self._active = False
-                        self._state = "line_lost"
-                        self.drive.stop()
-                        must_stop = True
-                    else:
-                        must_stop = False
-                        if self._active:
-                            self._state = "paused" if config["speed_percent"] == 0 else "following"
-                        else:
-                            self._state = "ready" if detection["line_detected"] else "no_line"
+                must_stop = self._apply_detection(detection, revision, now, config)
                 if mask_preview is not None:
                     with self._preview_ready:
                         self._preview_jpeg = mask_preview
                         self._preview_sequence += 1
                         self._preview_ready.notify_all()
                 if must_stop:
-                    logger.warning("Line lost; stopping autonomous drive")
+                    logger.warning("Line lost; stopping autonomous drive: %s", self._error)
                 elif self.active and detection["line_detected"]:
                     self._send_follow_command(detection["steering_error"], config)
             except Exception as exc:
@@ -332,13 +330,57 @@ class LineFollower:
                     self._error = str(exc)[:180]
                     self.drive.stop()
 
+    def _expire_line_loss(self, now: float) -> bool:
+        # Caller holds _lock. Even a recovered frame must not restart motion
+        # once the continuous loss has reached the deadline.
+        if (self._active and self._line_loss_started_at is not None
+                and now >= self._line_loss_started_at + self.LINE_LOSS_GRACE_SECONDS):
+            self._active = False
+            self._line_loss_started_at = None
+            self._state = "line_lost"
+            self.drive.stop()
+            return True
+        return False
+
+    def _apply_detection(
+        self, detection: dict[str, Any], revision: int, now: float, config: dict[str, Any]
+    ) -> bool:
+        with self._lock:
+            self._last_frame_at = now
+            self._processed_revision = revision
+            self._detection = detection
+            if self._expire_line_loss(now):
+                return True
+            if self._active and not detection["line_detected"]:
+                if self._line_loss_started_at is None:
+                    self._line_loss_started_at = now
+                self._error = detection.get("rejection_reason") or "Keine gültige Markierung erkannt."
+                self._state = "line_recovering"
+                deadline = self._line_loss_started_at + self.LINE_LOSS_GRACE_SECONDS
+                # Shorten the motor lease to the same absolute deadline. New
+                # bad frames cannot extend it, even if vision later stalls.
+                self._send_follow_command(self._last_steering_error, config, valid_until=deadline)
+                return False
+            if self._active:
+                self._line_loss_started_at = None
+                self._last_steering_error = detection.get("steering_error")
+                self._state = "paused" if config["speed_percent"] == 0 else "following"
+                self._error = None
+            elif self._state not in ("line_lost", "camera_lost", "error"):
+                self._state = "ready" if detection["line_detected"] else "no_line"
+                self._error = None
+            return False
+
     def _stop_if_camera_lost(self) -> None:
         camera = self.camera.status()
         with self._lock:
+            if self._expire_line_loss(time.monotonic()):
+                logger.warning("Line lost for 300 ms; stopping autonomous drive: %s", self._error)
             active = self._active
             age = time.monotonic() - self._last_frame_at if self._last_frame_at else None
             if active and (camera["state"] != "online" or age is None or age > self.FRAME_TIMEOUT_SECONDS):
                 self._active = False
+                self._line_loss_started_at = None
                 self._state = "camera_lost"
                 self._error = "Kamerabild veraltet oder nicht verfügbar."
                 self.drive.stop()
@@ -348,7 +390,9 @@ class LineFollower:
         if should_stop:
             logger.warning("Camera frame lost; stopping autonomous drive")
 
-    def _send_follow_command(self, steering_error: float | None, config: dict[str, Any]) -> None:
+    def _send_follow_command(
+        self, steering_error: float | None, config: dict[str, Any], *, valid_until: float | None = None
+    ) -> None:
         # Serialize motor updates with stop/disarm so an in-flight vision frame
         # cannot issue a stale nonzero command after the user presses Stop.
         with self._lock:
@@ -361,7 +405,10 @@ class LineFollower:
             correction = steering_error * config["steering_gain"] * base_speed
             left = max(0.0, min(self.drive.max_speed, base_speed - correction))
             right = max(0.0, min(self.drive.max_speed, base_speed + correction))
-            self.drive.set_speeds(left, right)
+            if valid_until is None:
+                self.drive.set_speeds(left, right)
+            else:
+                self.drive.set_speeds(left, right, valid_until=valid_until)
 
     def _analyze(
         self, jpeg: bytes, config: dict[str, Any]
@@ -411,9 +458,15 @@ class LineFollower:
         minimum_area = max(12.0, roi_area * config["min_area_percent"] / 100.0)
         maximum_area = roi_area * 0.55
         components: list[dict[str, Any]] = []
+        rejected_small = 0
+        rejected_large = 0
         for contour in contours:
             area = float(cv2.contourArea(contour))
-            if not minimum_area <= area <= maximum_area:
+            if area < minimum_area:
+                rejected_small += 1
+                continue
+            if area > maximum_area:
+                rejected_large += 1
                 continue
             moments = cv2.moments(contour)
             if moments["m00"] <= 0:
@@ -472,6 +525,24 @@ class LineFollower:
             target_y = sum(part["y"] for part in selected) / len(selected)
             target_area = sum(part["area"] for part in selected)
         detected = target_x is not None
+        rejection_reason = None
+        if not detected:
+            if not contours:
+                rejection_reason = "Keine Farbkontur im Suchbereich nach dem Rauschfilter."
+            elif not components:
+                if rejected_large and rejected_small:
+                    rejection_reason = "Farbkonturen liegen außerhalb der erlaubten Größe (Mindestfläche bis 55 % des Suchbereichs)."
+                elif rejected_large:
+                    rejection_reason = "Farbkontur zu groß: mehr als 55 % des Suchbereichs."
+                else:
+                    rejection_reason = "Einzelne Farbkonturen kleiner als die Mindestfläche (mindestens 12 Pixel²)."
+            elif config["line_mode"] == "single":
+                rejection_reason = "Farbe erkannt, aber keine längliche Linie (Seitenverhältnis mindestens 2,2:1)."
+            elif config["line_mode"] == "between":
+                if len(line_components) < 2:
+                    rejection_reason = "Farbe erkannt, aber weniger als zwei längliche Linien."
+                else:
+                    rejection_reason = "Zwei Linien erkannt, aber kein passender Abstand (16–90 % der Bildbreite)."
         steering_error = None
         heading_error = None
         line_angle_degrees = None
@@ -523,6 +594,7 @@ class LineFollower:
         preview_jpeg = buffer.tobytes() if encoded else None
         detection = {
             "line_detected": detected,
+            "rejection_reason": rejection_reason,
             "line_count": len(selected),
             "target_x_percent": round(target_x / width * 100, 1) if target_x is not None else None,
             "target_y_percent": round((target_y + roi_y) / height * 100, 1) if target_y is not None else None,

@@ -99,6 +99,19 @@ install -d "$INSTALL_ROOT"
 tar -C "$SOURCE_DIR" --exclude=.git --exclude=.local --exclude=.venv --exclude=__pycache__ -cf - . |
     tar -C "$INSTALL_ROOT" -xf -
 
+# Reuse verified student credentials, or ask for the existing Linux password.
+# The installer does not change the account password.
+(cd "$INSTALL_ROOT" && python3 -m wave_rover.configure_oled "$ROVER_USER" "$DEFAULT_SERIAL_DEVICE")
+
+# The web controller owns UART and OLED together. Retire the standalone writer
+# and its old ordering drop-in when upgrading a student installation.
+for OLED_UNIT in wave-rover-student-oled.service wave-rover-student-oled-reset.service; do
+    if systemctl cat "$OLED_UNIT" >/dev/null 2>&1; then
+        systemctl disable --now "$OLED_UNIT"
+    fi
+done
+rm -f /etc/systemd/system/wave-rover-control@.service.d/10-student-oled.conf
+
 python3 -m venv --system-site-packages "$INSTALL_ROOT/.venv"
 runuser -u "$ROVER_USER" -- "$INSTALL_ROOT/.venv/bin/python" -c "import cv2, numpy, serial"
 

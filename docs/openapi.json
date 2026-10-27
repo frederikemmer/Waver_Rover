@@ -392,6 +392,7 @@
         "required": ["line_detected", "line_count", "target_x_percent", "target_y_percent", "boundary_left_x_percent", "boundary_right_x_percent", "steering_error", "heading_error", "line_angle_degrees", "line_axis_far_x_percent", "line_axis_far_y_percent", "line_axis_near_x_percent", "line_axis_near_y_percent", "area_percent", "contour_count", "width", "height", "roi_top_percent", "fps", "frame_age_ms"],
         "properties": {
           "line_detected": { "type": "boolean", "description": "True when the configured area, single-line, or double-line mode selects a target." },
+          "rejection_reason": { "type": ["string", "null"], "description": "Why the current frame has no valid target; null when a target is detected." },
           "line_count": { "type": "integer", "description": "Selected color components: 0 for no target, 1 for area or single-line mode, 2 for double-line mode." },
           "target_x_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
           "target_y_percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
@@ -419,7 +420,7 @@
         "properties": {
           "available": { "type": "boolean" },
           "active": { "type": "boolean" },
-          "state": { "type": "string", "enum": ["vision_unavailable", "waiting_camera", "updating", "no_line", "ready", "following", "paused", "line_lost", "camera_lost", "error"] },
+          "state": { "type": "string", "enum": ["vision_unavailable", "waiting_camera", "updating", "no_line", "ready", "following", "paused", "line_recovering", "line_lost", "camera_lost", "error"] },
           "config": { "$ref": "#/components/schemas/LineAutonomyConfig" },
           "detection": { "$ref": "#/components/schemas/LineDetection" },
           "error": { "type": ["string", "null"] }

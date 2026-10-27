@@ -2,12 +2,15 @@
 Description=WAVE ROVER browser control service for user %i
 After=network-online.target
 Wants=network-online.target
+Conflicts=wave-rover-student-oled.service wave-rover-student-oled-reset.service
+After=wave-rover-student-oled.service wave-rover-student-oled-reset.service
 
 [Service]
 Type=simple
 User=%i
 WorkingDirectory=/opt/wave-rover-control
 EnvironmentFile=-/etc/default/wave-rover-control
+LoadCredential=rover-oled:/etc/wave-rover-student/credentials.json
 SupplementaryGroups=dialout video
 ExecStart=/opt/wave-rover-control/.venv/bin/python -m wave_rover
 Restart=on-failure
