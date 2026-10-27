@@ -98,3 +98,10 @@ The web interface includes an expandable, searchable guide to all API
 endpoints, with short explanations and request examples. On desktop, drag the
 divider between camera and controls to adjust their widths; on narrow screens
 the panels stack vertically.
+# README
+
+## Docs for the hardware
+
+[IMX335 5MP USB Camera](https://www.waveshare.com/wiki/IMX335_5MP_USB_Camera_(B))
+
+[WAVE ROVER](https://www.waveshare.com/wiki/WAVE_ROVER#JSON_Command_Set)
