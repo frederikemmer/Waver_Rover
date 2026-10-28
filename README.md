@@ -9,7 +9,7 @@ configures behavior and shows camera feedback.
 
 - Waveshare WAVE ROVER
 - Raspberry Pi 5, 8 GB
-- Waveshare IMX335 5 MP USB Camera B
+- [Waveshare IMX335 5 MP USB Camera B](https://www.waveshare.com/wiki/IMX335_5MP_USB_Camera_(B))
 
 The implementation uses the Waveshare controller's GPIO UART JSON protocol and
 a local MJPEG camera stream. OpenCV analyzes color thresholds on the Pi. The
